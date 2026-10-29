@@ -19,6 +19,8 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+      - run: python3 -m pip install -r scripts/requirements-docs.txt
+      - run: make check/docs
       - run: make tidy && git diff --exit-code
       - run: make lint
       - run: make test

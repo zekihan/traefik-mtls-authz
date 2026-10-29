@@ -3,7 +3,8 @@
 This repository is a Traefik middleware plugin for per-application mTLS authorization.
 v0.1.0 is a deny-all skeleton, not a usable authorization implementation.
 
-Run `make tidy`, `make lint`, and `make test` before committing.
+Run `make tidy`, `make lint`, and `make test` before committing. Run `make check/docs`
+after editing fenced YAML in docs/ or README.md.
 Keep code compatible with Traefik's Yaegi interpreter: avoid generics and verify
 real Traefik loading before claiming production compatibility.
 
