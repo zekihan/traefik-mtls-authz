@@ -7,6 +7,8 @@ Run `make tidy`, `make lint`, and `make test` before committing.
 Keep code compatible with Traefik's Yaegi interpreter: avoid generics and verify
 real Traefik loading before claiming production compatibility.
 
+The implementation design is in docs/design.md; follow it.
+
 Security contracts for future implementation:
 - Native Traefik RequireAndVerifyClientCert performs certificate validation.
 - Require verified TLS state; never accept client identity from HTTP headers.

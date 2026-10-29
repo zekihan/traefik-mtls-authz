@@ -23,6 +23,11 @@ Existing WebSockets and upload streams require separate connection draining when
 access is withdrawn. No CA consolidation or live ingress migration is part of
 this skeleton release.
 
+## Design
+
+The implementation design, request authorization algorithm, configuration schema and
+acceptance criteria are in [docs/design.md](docs/design.md).
+
 ## Development
 
 ```sh
