@@ -28,7 +28,7 @@ middleware instances, metrics registration (not possible from a yaegi plugin).
 | R2 | If `New` returns an error, or the Middleware is missing or malformed, that router is not registered. The request is then handled by the **next matching router** by priority, or by the 404 handler only if nothing else matches. The host's TLS option is still installed, so the client certificate is still demanded first. | `pkg/server/middleware/middlewares.go:73,476`, `pkg/server/router/router.go:262-265`, `pkg/muxer/http/mux.go:47-62` |
 | R3 | With `experimental.abortOnPluginFailure`, a plugin that fails to download or parse makes Traefik exit. Without it, every plugin middleware is disabled and routers referencing one fall under R2. | `cmd/traefik/traefik.go:255-262` |
 | R4 | Every TLS router gets an automatic SNI check: the TLS option chosen by SNI must equal the router's option, otherwise 421 before any middleware runs. Two routers that share one TLS option pass this check for each other. | `pkg/server/router/router.go:383-386`, `pkg/middlewares/snicheck` |
-| R5 | When one host is served by routers with different TLS options, all of them silently fall back to the **default** options unless `core.strictTLSOptions=true`. In that case no client certificate is requested and `VerifiedChains` is empty. | `pkg/server/aggregator.go:192-321` |
+| R5 | When one host is served by routers with different TLS options, all of them silently fall back to the **default** options unless `core.strictTLSOptions=true`, which disables them instead. A router with no Host in its rule and a non-default option is disabled too. A host whose routers are all disabled has no per-SNI TLS entry and is served with the **default** TLS configuration: no client certificate is requested and `VerifiedChains` is empty. | `pkg/server/aggregator.go:192-321`, `pkg/server/router/tcp/manager.go:175-177`, `pkg/server/router/tcp/router.go:280-311` |
 | R6 | `VerifiedChains` is set on the server only for `VerifyClientCertIfGiven` with a certificate or `RequireAndVerifyClientCert`. `PeerCertificates` may be set without verification. | Go `crypto/tls/common.go:283-304` |
 | R7 | On session resumption Go restores `PeerCertificates` and `VerifiedChains` from the ticket, after re-checking presence, leaf `NotAfter`, and that a stored chain still verifies (including every certificate's validity) against the current `ClientCAs` with the clientAuth EKU. With `SessionTicketsDisabled` there is no resumption in TLS 1.2 or 1.3. Tickets live at most 7 days; keys rotate every 24h per process. | Go 1.27 `handshake_server_tls13.go:295,362-428`, `handshake_server.go:450,508-549`, `common.go:970,998` |
 | R8 | An established keep-alive connection is never re-validated by TLS. Expiry of the leaf **or of any CA in the chain** after the handshake is invisible to Traefik. | Go `crypto/tls` (no post-handshake checks) |
@@ -227,7 +227,10 @@ counted in `traefik_router_requests_total`. That is the metrics path.
   file-provider router for that host, and any catch-all router (no Host rule, `HostRegexp`, bare
   `PathPrefix`). Otherwise a failed or missing Middleware does not fail closed: Traefik serves the request
   through the next matching router (R2), and a router that shares the same TLS option passes the SNI check
-  (R4). Traefik cannot detect this; it must be enforced by rendering/CI checks in the deployment repository.
+  (R4). A catch-all on default options is not a bypass for a live mTLS host (it answers 421 because the
+  connection used the mTLS option) but it does serve a host whose routers were disabled by a TLS-option
+  conflict, without any client certificate (R5). Traefik cannot detect any of this; it must be enforced by
+  rendering/CI checks in the deployment repository.
 - The global parts of the policy (`trustedIssuers`, `identityPrefix`, `disabledIdentities`,
   `blockedFingerprints`) are identical in every Middleware; `policyRevision` makes drift visible in logs.
 - `experimental.abortOnPluginFailure: true` and a pinned `hash` (R3, R11).
@@ -256,8 +259,29 @@ next handler still sees `http.Hijacker` and `http.Flusher` on the ResponseWriter
 one handler.
 
 Real-Traefik integration (docker compose modeled on `traefik-real-ip/testing`, `traefik:v3.7.14` by digest,
-source mounted at `/plugins-local/src/github.com/zekihan/traefik-mtls-authz`, file provider with a
-`RequireAndVerifyClientCert` TLSOption, test CA, intermediate and leaves generated per run, never checked in):
+`core.strictTLSOptions=true` as in the deployment contract, source mounted at
+`/plugins-local/src/github.com/zekihan/traefik-mtls-authz`, file provider, test CA, intermediate and leaves
+generated per run, never checked in). Routers are plain `Host()` rules unless stated; priorities are explicit.
+
+Fixture TLS options and routers:
+
+| Router | TLS option | Rule (priority) | Middleware |
+|---|---|---|---|
+| (option) `default` | no client auth | | |
+| (options) `mtls-a`, `mtls-b` | `RequireAndVerifyClientCert`, same test CA, distinct names | | |
+| `app-a` | `mtls-a` | `Host(app-a.test)` | `mtls-authz`, policy A |
+| `app-a2` | `mtls-a` | `Host(app-a2.test)` | `mtls-authz`, policy A2 |
+| `app-b` | `mtls-b` | `Host(app-b.test)` | `mtls-authz`, policy B |
+| `plain` | `default` | `Host(plain.test)` | none |
+| `broken` | `mtls-a` | `Host(broken.test)` | `mtls-authz`, malformed policy (`New` fails) |
+| `bypass-hi` / `bypass-lo` | `mtls-a` / `mtls-a` | `Host(bypass.test)` (20 / 10) | malformed policy / none |
+| `conflict-a` / `conflict-d` | `mtls-a` / `default` | `Host(conflict.test)` (20 / 10) | `mtls-authz` / none |
+| `catchall` | `default` | `PathPrefix(/)` (1) | none |
+| `catchall-mtls` | `mtls-a` | `PathPrefix(/)` (1) | none |
+
+The matrix runs twice, with `catchall` present and absent, because it changes several outcomes.
+
+Authorization on `app-a.test`:
 
 - no certificate and wrong CA fail the handshake;
 - valid but unenrolled identity -> 403 with the reason header; enrolled -> 200;
@@ -265,21 +289,47 @@ source mounted at `/plugins-local/src/github.com/zekihan/traefik-mtls-authz`, fi
 - blocked fingerprint -> 403; disabled identity -> 403; expired leaf -> handshake failure;
 - CA expiry on an established connection: handshake while the CA is valid, advance the fixture clock (or use
   a CA whose `NotAfter` is seconds away), second request on the same keep-alive connection -> 403 `cert_time`;
-- SNI/Host across different TLS options -> 421; across the same option -> routed and authorized per app;
 - TLS 1.2 and TLS 1.3;
 - resumed session with tickets enabled (`openssl s_client -sess_out/-sess_in`) -> same decision (A2);
 - tickets disabled -> no ticket issued, full handshake (A3);
 - WebSocket upgrade allowed and denied; chunked streaming POST allowed;
 - policy change while a WebSocket is open -> stream survives, next request denied;
-- broken plugin directory -> Traefik exits with `abortOnPluginFailure`;
-- **failure with route coverage**: malformed policy or missing Middleware on a host that has no other
-  matching router -> 404;
-- **failure without route coverage** (negative controls that must be documented, not made to pass): the same
-  host also served by a lower-priority catch-all `PathPrefix(`/`)` router without the middleware -> request
-  reaches the backend; a second router for the host sharing the same TLS option without the middleware ->
-  reaches the backend; the second router with a different TLS option -> 421;
-- unknown key beside `policy`, list-valued `policy` -> router unregistered (404 with coverage);
 - stderr deny lines present at Traefik log level INFO.
+
+SNI check, always with distinct SNI and Host names:
+
+- SNI `app-a.test`, `Host: app-b.test` -> 421 (options differ, R4);
+- SNI `app-a.test`, `Host: plain.test` -> 421 (`mtls-a` vs `default`);
+- SNI `app-a.test`, `Host: app-a2.test` -> routed to `app-a2` and decided by policy A2 (same option passes
+  R4; this is the designed per-app authorization, not a bypass).
+
+Failure with route coverage (`broken.test`; the per-SNI entry for `mtls-a` still exists, so the client
+certificate is still demanded):
+
+- `catchall` absent -> 404;
+- `catchall` present -> 421, because `catchall` resolves to `default` while the connection used `mtls-a`;
+- unknown key beside `policy` and list-valued `policy` on `broken` -> same two outcomes;
+- missing Middleware object on `broken` -> same two outcomes.
+
+Negative controls (documented outcomes that the plugin cannot fix; the deployment repository's route-coverage
+check is the mitigation):
+
+- same host, same option: `bypass.test` -> `bypass-hi` is disabled by its malformed policy and `bypass-lo`
+  serves the request with any CA-valid certificate -> reaches the backend;
+- same host, different options under strict: `conflict.test` -> both routers disabled (Traefik logs "served
+  by multiple routers with different TLS options ... disabled"); the handshake uses the **default** TLS
+  config and asks for no client certificate; without a certificate the request gets 404 when `catchall` is
+  absent and reaches the `catchall` backend when it is present;
+- `catchall-mtls` is disabled at load (no Host in rule, non-default option; Traefik logs it); assert the log
+  line and that an unmatched host still gets 404;
+- one extra run with `core.strictTLSOptions=false`: `conflict.test` keeps both routers on `default`
+  options, no client certificate is requested, `conflict-a` (higher priority, with middleware) answers 403
+  `unverified`; with the priorities swapped `conflict-d` would serve without any certificate. This is why the
+  contract requires `strictTLSOptions=true` and the middleware on every router of a host.
+
+Process-level:
+
+- broken plugin directory -> Traefik exits with `abortOnPluginFailure`.
 
 Acceptance before any production route: A1 (R12 behavior inside Traefik v3.7.14 itself), A2, A3,
 A4 (both TLS versions), A5 (PROXY protocol v2 path leaves `req.TLS` intact) all pass in CI, and

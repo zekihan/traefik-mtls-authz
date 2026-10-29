@@ -52,7 +52,8 @@ def check_policy(block, where):
     unknown = set(policy) - POLICY_KEYS
     if unknown:
         errors.append(f"{where}: unknown policy keys {sorted(unknown)}")
-    if policy.get("schemaVersion") != 1:
+    version = policy.get("schemaVersion")
+    if type(version) is not int or version != 1:  # bool is an int subclass; True == 1 must fail
         errors.append(f"{where}: schemaVersion must be the integer 1")
     prefix = policy.get("identityPrefix")
     if not isinstance(prefix, str) or not prefix.endswith(":"):
