@@ -1,0 +1,5 @@
+displayName: Traefik mTLS Authorization
+type: middleware
+import: github.com/zekihan/traefik-mtls-authz
+summary: Per-application client certificate authorization (deny-all skeleton).
+testData: {}
