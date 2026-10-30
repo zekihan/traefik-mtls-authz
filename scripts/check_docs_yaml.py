@@ -32,17 +32,18 @@ POLICY_KEYS = {
 FENCE = re.compile(r"^```yaml[^\n]*\n(.*?)^```", re.MULTILINE | re.DOTALL)
 
 
-def find_plugin_blocks(node):
-    """Yield every mapping stored under a traefik-mtls-authz key, at any depth."""
+def find_plugin_blocks(node, path=()):
+    """Yield middleware policy blocks, excluding static plugin registrations."""
     if isinstance(node, dict):
         for key, value in node.items():
             if key == PLUGIN_KEY:
-                yield value
+                if path[-2:] != ("experimental", "plugins"):
+                    yield value
             else:
-                yield from find_plugin_blocks(value)
+                yield from find_plugin_blocks(value, path + (key,))
     elif isinstance(node, list):
         for item in node:
-            yield from find_plugin_blocks(item)
+            yield from find_plugin_blocks(item, path)
 
 
 def unique_json_object(pairs):
