@@ -89,7 +89,7 @@ before attaching a middleware to a route. It requires:
 
 - `RequireAndVerifyClientCert`, `sniStrict: true`, disabled session tickets and the intended CA bundle.
 - `core.strictTLSOptions: true` and `experimental.abortOnPluginFailure: true`.
-- A pinned plugin version and catalog archive hash.
+- A pinned plugin version and catalog archive hash, or a pinned commit while loaded as a local plugin.
 - Authorization first on **every** router that can serve an mTLS host, including alternate and catch-all routes.
 - Consistent global policy fields and visible policy revisions across applications.
 

@@ -296,7 +296,8 @@ counted in `traefik_router_requests_total`. That is the metrics path.
   rendering/CI checks in the deployment repository.
 - The global parts of the policy (`trustedIssuers`, `identityPrefix`, `disabledIdentities`,
   `blockedFingerprints`) are identical in every Middleware; `policyRevision` makes drift visible in logs.
-- `experimental.abortOnPluginFailure: true` and a pinned `hash` (R3, R11).
+- `experimental.abortOnPluginFailure: true` and a pinned `hash` (R3, R11), or a pinned commit while loaded as a
+  local plugin (section 10).
 - Nothing terminates the client's TLS in front of Traefik on these routes.
 
 ## 8. Known limits
@@ -411,7 +412,9 @@ A4 (both TLS versions), A5 (PROXY protocol v2 path leaves `req.TLS` intact) all 
 
 ## 10. Release and catalog requirements
 
-Delivery is through the Traefik Plugin Catalog (decision D1): public repository, `traefik-plugin` topic,
+Delivery is through the Traefik Plugin Catalog (decision D1, revised 2026-10-30: until the catalog indexes a
+release, the tagged source is loaded as a local plugin from `/plugins-local/src/github.com/zekihan/traefik-mtls-authz`,
+pinned by commit, so the root package must stay loadable there without a vendor directory): public repository, `traefik-plugin` topic,
 `.traefik.yml` with a complete valid `testData` policy, `go.mod`, git tags, dependencies vendored (none
 planned). The catalog polls GitHub daily and opens an issue in the repository when a check fails; close it
 after fixing. Operators pin `version` and `hash` (R11). Record the archive hash in the release notes.
