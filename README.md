@@ -2,6 +2,11 @@
 
 A Traefik middleware plugin for per-application client certificate authorization.
 
+[![Traefik Plugin](https://img.shields.io/badge/Traefik%20Plugin-Traefik%20mTLS%20Authorization-blue)](https://plugins.traefik.io/plugins/6ae44f4d45a3588988cfca95/traefik-m-tls-authorization)
+[![Version](https://img.shields.io/badge/version-0.1.1-green)](https://github.com/zekihan/traefik-mtls-authz/releases/tag/v0.1.1)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/zekihan/traefik-mtls-authz/blob/main/LICENSE)
+[![Checks](https://github.com/zekihan/traefik-mtls-authz/actions/workflows/pr.yaml/badge.svg)](https://github.com/zekihan/traefik-mtls-authz/actions/workflows/pr.yaml)
+
 Traefik verifies the certificate with `RequireAndVerifyClientCert`. This plugin
 requires that verified TLS state, pins its trust anchor, checks the entire chain's
 current validity, and authorizes one exact enrolled URI SAN per application.
@@ -17,6 +22,37 @@ and HTTP/2 on both TLS versions, session resumption, PROXY v2, routing failures,
 and stream behavior.
 These are local fixture tests; deployment and GitOps integration belong in the
 argocd repository. No production routes have been changed by this implementation.
+
+## Installation
+
+### Plugin Catalog
+
+Find the plugin in the
+[Traefik Plugin Catalog](https://plugins.traefik.io/plugins/6ae44f4d45a3588988cfca95/traefik-m-tls-authorization).
+The current release is [v0.1.1](https://github.com/zekihan/traefik-mtls-authz/releases/tag/v0.1.1).
+
+### Static Configuration
+
+Add the plugin to your Traefik static configuration and restart Traefik:
+
+```yaml
+core:
+  strictTLSOptions: true
+
+experimental:
+  abortOnPluginFailure: true
+  plugins:
+    traefik-mtls-authz:
+      moduleName: github.com/zekihan/traefik-mtls-authz
+      version: v0.1.1
+      hash: "2cc96729ae89164d5c6a73ad79601bf04efcedc0448cd93e0eb8f81465d90c23"
+```
+
+The hash pins the v0.1.1 archive downloaded from the Plugin Catalog. Update the
+version and hash together when upgrading; it is not the hash of GitHub's source zip.
+Then create the middleware described below and place it first on every matching
+application router. The route must use `RequireAndVerifyClientCert`; see the
+[deployment contract](#deployment-contract) for the required TLS and route coverage.
 
 ## Configuration
 
@@ -61,6 +97,24 @@ http:
               "forwardIdentityHeader": ""
             }
 ```
+
+### Configuration Options
+
+These fields belong inside the JSON object supplied as `policyJSON`.
+
+| Option | Type | Required / default | Description |
+|---|---|---|---|
+| `schemaVersion` | integer | Required: `1` | Policy schema version. |
+| `app` | string | Required | Non-empty application name used in logs. |
+| `policyRevision` | string | `""` | Revision identifier used to trace policy changes in logs. |
+| `trustedIssuers` | array of strings | Required, non-empty | SHA-256 fingerprints of verified trust-anchor DER certificates, as 64 lowercase hex characters. |
+| `identityPrefix` | string | Required | Full namespace such as `urn:noqer:mtls:clients:`. |
+| `identities` | array of strings | `[]` | Exact enrolled URI SAN identities allowed for this application; an empty list denies everyone. |
+| `disabledIdentities` | array of strings | `[]` | Identities denied even when enrolled. |
+| `blockedFingerprints` | array of objects | `[]` | Block certificates by `fingerprint`; optional `note` and `expires` fields document each block. |
+| `constraints` | object | `{}` | Per-enrolled-identity `methods` and `paths` lists; both must be non-empty. |
+| `stripHeaders` | boolean | `true` | Mandatory identity-header stripping; `false` is rejected. |
+| `forwardIdentityHeader` | string | `""` | Optional verified identity header in the `X-Mtls-*` namespace, for example `X-Mtls-Identity`. |
 
 Header stripping is mandatory. Successful requests lose `X-Forwarded-Tls-Client-Cert`,
 `X-Forwarded-Tls-Client-Cert-Info` and all `X-Mtls-*` headers. To pass the verified
@@ -115,7 +169,8 @@ Private keys are temporary, never committed or copied into logs. See
 
 ## Releases
 
-`VERSION` contains the next release version without `v`; tags use `v0.1.1`.
+`VERSION` contains the plugin version without `v`; git tags use the `v` prefix.
+See [GitHub Releases](https://github.com/zekihan/traefik-mtls-authz/releases) for release notes.
 The release workflow requires unit, documentation and real-Traefik checks before
 publishing a source release. The public repository needs the `traefik-plugin`
 topic for catalog discovery. After catalog indexing, download the exact catalog
