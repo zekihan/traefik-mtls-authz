@@ -6,12 +6,15 @@ Exit status is non-zero when any block fails to parse or a policy example is mal
 """
 
 import glob
+import json
 import re
 import sys
 
 import yaml
 
 PLUGIN_KEY = "traefik-mtls-authz"
+PREFIX = re.compile(r"^urn:noqer:mtls:[a-z0-9]+(?:-[a-z0-9]+)*:$")
+FORWARD_HEADER = re.compile(r"^X-Mtls-[!#$%&'*+\-.^_`|~0-9A-Za-z]+$", re.IGNORECASE)
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 POLICY_KEYS = {
     "schemaVersion",
@@ -42,11 +45,26 @@ def find_plugin_blocks(node):
             yield from find_plugin_blocks(item)
 
 
+def unique_json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate key {key!r}")
+        result[key] = value
+    return result
+
+
 def check_policy(block, where):
     errors = []
-    if not isinstance(block, dict) or set(block) != {"policy"}:
-        return [f"{where}: plugin block must contain exactly one key 'policy'"]
-    policy = block["policy"]
+    if not isinstance(block, dict) or set(block) not in ({"policy"}, {"policyJSON"}):
+        return [f"{where}: plugin block must contain exactly one key 'policy' or 'policyJSON'"]
+    if "policyJSON" in block:
+        try:
+            policy = json.loads(block["policyJSON"], object_pairs_hook=unique_json_object)
+        except (ValueError, TypeError) as exc:
+            return [f"{where}: invalid policyJSON: {exc}"]
+    else:
+        policy = block["policy"]
     if not isinstance(policy, dict):
         return [f"{where}: policy must be a mapping, got {type(policy).__name__}"]
     unknown = set(policy) - POLICY_KEYS
@@ -56,8 +74,8 @@ def check_policy(block, where):
     if type(version) is not int or version != 1:  # bool is an int subclass; True == 1 must fail
         errors.append(f"{where}: schemaVersion must be the integer 1")
     prefix = policy.get("identityPrefix")
-    if not isinstance(prefix, str) or not prefix.endswith(":"):
-        errors.append(f"{where}: identityPrefix must be a string ending with ':'")
+    if not isinstance(prefix, str) or not PREFIX.fullmatch(prefix) or len(prefix) >= 128:
+        errors.append(f"{where}: identityPrefix must be a full profile namespace ending with ':'")
         prefix = ""
     issuers = policy.get("trustedIssuers")
     if not isinstance(issuers, list) or not issuers or not all(
@@ -73,10 +91,20 @@ def check_policy(block, where):
         errors.append(f"{where}: constraints must be a mapping")
     else:
         for identity, rule in constraints.items():
+            enrolled = policy.get("identities", [])
+            if isinstance(enrolled, list) and identity not in enrolled:
+                errors.append(f"{where}: constraint key {identity!r} must be enrolled")
             if not identity.startswith(prefix):
                 errors.append(f"{where}: constraint key {identity!r} is outside the identityPrefix")
             if not isinstance(rule, dict) or not rule.get("methods") or not rule.get("paths"):
                 errors.append(f"{where}: constraint {identity!r} needs non-empty methods and paths")
+    forward = policy.get("forwardIdentityHeader", "")
+    if not isinstance(forward, str) or (forward and not FORWARD_HEADER.fullmatch(forward)):
+        errors.append(f"{where}: forwardIdentityHeader must be empty or a valid X-Mtls-* token")
+    if policy.get("stripHeaders", True) is not True:
+        errors.append(f"{where}: stripHeaders must be true or omitted")
+    if not isinstance(policy.get("app"), str) or not policy["app"].strip():
+        errors.append(f"{where}: app must be a non-empty string")
     for entry in policy.get("blockedFingerprints", []):
         if not isinstance(entry, dict) or not HEX64.match(str(entry.get("fingerprint", ""))):
             errors.append(f"{where}: blockedFingerprints entries need a 64 lowercase hex fingerprint")
@@ -87,6 +115,12 @@ def check_file(path):
     text = open(path, encoding="utf-8").read()
     errors = []
     blocks = 0
+    if path.endswith(".traefik.yml"):
+        try:
+            metadata = yaml.safe_load(text)
+            return 1, check_policy(metadata.get("testData"), f"{path}:testData")
+        except yaml.YAMLError as exc:
+            return 1, [f"{path}: YAML parse error: {exc}"]
     for match in FENCE.finditer(text):
         blocks += 1
         line = text.count("\n", 0, match.start()) + 1
@@ -103,7 +137,7 @@ def check_file(path):
 
 
 def main(argv):
-    paths = argv[1:] or ["README.md", *sorted(glob.glob("docs/*.md"))]
+    paths = argv[1:] or ["README.md", *sorted(glob.glob("docs/*.md")), ".traefik.yml"]
     total = 0
     failures = []
     for path in paths:

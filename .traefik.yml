@@ -1,5 +1,23 @@
 displayName: Traefik mTLS Authorization
 type: middleware
 import: github.com/zekihan/traefik-mtls-authz
-summary: Per-application client certificate authorization (deny-all skeleton).
-testData: {}
+summary: Per-application authorization of verified client certificate URI SAN identities.
+testData:
+  policyJSON: |
+    {
+      "schemaVersion": 1,
+      "app": "catalog-validation",
+      "policyRevision": "catalog-1",
+      "trustedIssuers": [
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      ],
+      "identityPrefix": "urn:noqer:mtls:clients:",
+      "identities": [
+        "urn:noqer:mtls:clients:catalog-client"
+      ],
+      "disabledIdentities": [],
+      "blockedFingerprints": [],
+      "constraints": {},
+      "stripHeaders": true,
+      "forwardIdentityHeader": ""
+    }

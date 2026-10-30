@@ -1,0 +1,11 @@
+# Linux host networking lets the Go harness supply a backend on an ephemeral port.
+# All PKI material is generated in an ephemeral directory by the test runner.
+services:
+  traefik:
+    image: traefik:v3.7.14@sha256:575fa15b135078fe5e50aa847987d96dbddd7b093c172429618404df73f3fa7c
+    network_mode: host
+    command: [--configFile=/fixture/static.json]
+    volumes:
+      - ${MTLS_FIXTURE_DIR:?fixture directory required}:/fixture:ro
+      - ${MTLS_FIXTURE_DIR:?fixture directory required}/logs:/logs
+      - ${MTLS_SOURCE_DIR:?source directory required}:/plugins-local/src/github.com/zekihan/traefik-mtls-authz:ro

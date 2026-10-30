@@ -1,6 +1,7 @@
 # Design: per-application mTLS authorization
 
-Status: design only (2026-10-30, revised after review). Nothing below is implemented; v0.1.0 denies every request.
+Status: implemented for v0.1.1 (2026-10-30), with local real-Traefik acceptance tests.
+v0.1.0 remains the historical deny-all skeleton; no production deployment is implied.
 Target runtime: Traefik v3.7.14 (yaegi v0.16.1, Go 1.26 module), Go standard library only, no generics.
 Deployment, GitOps policy distribution, PKI, DNS and migration details live in the argocd repository.
 
@@ -33,12 +34,14 @@ middleware instances, metrics registration (not possible from a yaegi plugin).
 | R7 | On session resumption Go restores `PeerCertificates` and `VerifiedChains` from the ticket, after re-checking presence, leaf `NotAfter`, and that a stored chain still verifies (including every certificate's validity) against the current `ClientCAs` with the clientAuth EKU. With `SessionTicketsDisabled` there is no resumption in TLS 1.2 or 1.3. Tickets live at most 7 days; keys rotate every 24h per process. | Go 1.27 `handshake_server_tls13.go:295,362-428`, `handshake_server.go:450,508-549`, `common.go:970,998` |
 | R8 | An established keep-alive connection is never re-validated by TLS. Expiry of the leaf **or of any CA in the chain** after the handshake is invisible to Traefik. | Go `crypto/tls` (no post-handshake checks) |
 | R9 | yaegi v0.16.1 exports `tls.ConnectionState`, `x509.Certificate`, `x509.ParseCertificate`, `x509.VerifyOptions`, `x509.CertPool`, `crypto/sha256`, `encoding/pem`. The plugin receives the real `*http.Request` through reflection, so `req.TLS` is the live connection state. | `yaegi/stdlib/go1_22_crypto_tls.go`, `go1_22_crypto_x509.go`, `middlewareyaegi.go:66-78` |
-| R10 | Plugin `os.Stdout` is logged at DEBUG and `os.Stderr` at ERROR. Stdout-only logging is invisible at INFO. | `middlewareyaegi.go:139-142` |
+| R10 | Yaegi routes `fmt.Print*` through interpreter stdout (Traefik DEBUG), and `log.Writer()` / `log.Print*` through interpreter stderr (Traefik ERROR). Direct `os.Stdout` / `os.Stderr` writes bypass Traefik's formatting, metadata and file destination. | `middlewareyaegi.go:newInterpreter`, Yaegi `interp/use.go:fixStdlib`; real console/JSON-file regression tests |
 | R11 | `experimental.plugins.<name>.hash` is the SHA-256 of the downloaded archive; Traefik refuses a mismatch. | `pkg/plugins/manager.go:80-95,341-357` |
 | R12 | A `CreateConfig` that returns `*map[string]any` receives the complete plugin block verbatim through Traefik's decoder path (map-to-map copy; nested values are assigned as-is, so lists stay lists and strings stay strings). Reading `VerifiedChains`, `URIs`, `Raw`, `NotAfter` and computing `sha256.Sum256` work in interpreted code. | Probe: yaegi v0.16.1 + mapstructure `v1.5.1-0.20231216201459` with Traefik's exact decoder settings, outside Traefik (2026-10-30) |
+| R13 | The file provider's parser stringifies scalar values inside plugin maps **before** R12. Native YAML `1` / `true` arrive as strings `"1"` / `"true"`. R12 alone therefore cannot preserve types end to end. A JSON object carried as a single `policyJSON` string preserves its internal types. | Real Traefik v3.7.14 file-provider fixture, 2026-10-30 |
 
-Still to verify inside a real Traefik process, therefore acceptance criteria (section 9): A1 the R12 behavior
-under Traefik v3.7.14 itself, and the resumption cases A2 and A3.
+A1 now tests strict configuration through the complete provider path using `policyJSON`.
+A2/A3 assert resumption and ticket behavior with Go's real TLS client on both TLS versions.
+All A1–A5 cases are exercised by `make test/integration`; see `testing/README.md`.
 
 ## 3. Request authorization algorithm
 
@@ -57,14 +60,25 @@ Per request. No body access. The handler never wraps the ResponseWriter, so `htt
    on an established connection.
 6. `hex(sha256(leaf.Raw))` in `blockedFingerprints` -> deny `fingerprint_blocked`.
 7. Identity: exactly one entry in `leaf.URIs` and none in `DNSNames`, `EmailAddresses`, `IPAddresses`.
-   The URI string must match `^urn:noqer:mtls:[a-z0-9]+(-[a-z0-9]+)*:[a-z0-9]([-a-z0-9]*[a-z0-9])?$`,
+   The raw SAN sequence must contain exactly one primitive context-specific URI
+   GeneralName (tag 6), with no other entries. This also rejects alternatives such
+   as registeredID/otherName/directoryName that Go does not expose in those fields.
+   Unknown GeneralName tags are malformed evidence -> `identity_invalid`.
+   The raw IA5 URI bytes from SAN extension OID `2.5.29.17` must match `^urn:noqer:mtls:[a-z0-9]+(-[a-z0-9]+)*:[a-z0-9]([-a-z0-9]*[a-z0-9])?$`,
    be at most 128 bytes and start with `identityPrefix`. Zero URIs -> `identity_missing`; more than one, or
    extra SAN types -> `identity_ambiguous`; bad syntax or prefix -> `identity_invalid`.
-   Comparison is exact bytes; no case folding, no normalization.
+   Comparison is exact bytes; no case folding, no normalization. The raw URI must also
+   equal Go's parsed `leaf.URIs[0].String()`: a scheme such as `URN:` that Go
+   silently lowercases is denied `identity_invalid`. Missing/malformed raw SAN
+   evidence also denies `identity_invalid` when the parsed URI field is present.
 8. Identity in `disabledIdentities` -> deny `identity_disabled`.
 9. Identity not in `identities` -> deny `not_enrolled`.
 10. If `constraints[identity]` exists: `req.Method` must be listed and `req.URL.Path` must equal one listed
-    path exactly -> else `constraint_method` / `constraint_path`.
+    path exactly -> else `constraint_method` / `constraint_path`. The path must also
+    have a canonical literal spelling (`req.URL.EscapedPath() == req.URL.Path`),
+    preventing encoded separators from reaching a backend under an allowed
+    decoded path. Traefik normalizes unreserved encodings before this check and
+    forwards that same normalized spelling to the backend.
 11. Delete inbound `X-Forwarded-Tls-Client-Cert`, `X-Forwarded-Tls-Client-Cert-Info` and every `X-Mtls-*`
     header. If `forwardIdentityHeader` is set, set that header to the identity.
 12. `next.ServeHTTP(rw, req)`.
@@ -79,33 +93,50 @@ CN and other subject fields are never consulted. Every deny is HTTP 403 with bod
 ## 4. Identity rules
 
 - One leaf = one identity = one URI SAN of the form `urn:noqer:mtls:<profile>:<name>`.
-- `identityPrefix` (for example `urn:noqer:mtls:clients:`) ties the identity namespace to the pinned CA.
+- `identityPrefix` must be a full `urn:noqer:mtls:<profile>:` namespace
+  (for example `urn:noqer:mtls:clients:`), tying one profile to the pinned CA.
+  Broad prefixes such as `urn:` or `urn:noqer:mtls:` are rejected.
   Every configured identity and constraint key must start with it; the plugin rejects the policy otherwise.
 - Renewal keeps the URI and changes the key and fingerprint; the policy is keyed by URI, so renewals need no
   policy change. Blocking is per certificate (fingerprint); disabling is per identity.
 
 ## 5. Configuration
 
-Traefik's decoder cannot be made strict (R1), so the plugin must see the raw block. `CreateConfig` returns
-`*map[string]any` and `New` takes `*map[string]any`; Traefik copies the whole plugin block into it
-unchanged (R12). `New` then enforces:
+Traefik's decoder cannot be made strict (R1), so the plugin sees the raw block.
+`CreateConfig` returns `*map[string]interface{}` and `New` accepts the same type
+(`interface{}` is used instead of `any` for straightforward Yaegi compatibility).
+Traefik copies the plugin block into it (R12), but providers may already have
+coerced its values (R13). Two mutually exclusive transports are supported:
 
-1. the map is non-empty and its only key is `policy` (any other key, such as a `constraints` block placed
-   beside `policy`, is an error);
-2. `policy` is a JSON object (`map[string]any`), not a list, string, or null;
-3. the block re-encoded to JSON decodes with `json.Decoder.DisallowUnknownFields` into the typed policy
-   below, so unknown nested keys and wrong types (a string where an int is expected) are errors;
+- `policyJSON`: the object serialized as a JSON string. **Use this for every
+  provider, including Kubernetes.** All deployment examples use this form; the
+  integration suite loads it through the file provider and tests catalog testData.
+- `policy`: a native object retained for direct callers and providers independently
+  verified to preserve native JSON types. Only direct/unit loading is tested for
+  this form. Its successful use through the Kubernetes CRD provider is unverified;
+  there is no recommendation to deploy that form.
+
+`New` enforces:
+
+1. the outer map has exactly one key, `policy` or `policyJSON`; extra keys and both
+   transports together are errors;
+2. `policy` is a `map[string]interface{}` object, never a list/string/null;
+   `policyJSON` is a string containing exactly one JSON object;
+3. JSON decoding uses `DisallowUnknownFields`; explicit nulls, incorrect key casing,
+   wrong types and duplicate JSON keys are rejected too (no weak coercion);
 4. the semantic checks listed after the struct.
 
-Any failure is an error from `New`, which Traefik turns into an unregistered router (R2). Cost: an
-unconventional config signature and one extra nesting level in YAML. `.traefik.yml` `testData` must hold a
-complete valid policy because the plugin catalog loads it.
+The JSON reader has a 32-level nesting bound. An empty allowlist is valid and logs
+`empty_allowlist`; a missing/empty policy itself is invalid. Any failure returns an
+error from `New`, which Traefik turns into an unregistered router (R2).
+`.traefik.yml` `testData` contains a complete valid `policyJSON` policy for catalog
+loading without relying on the metadata decoder's scalar handling.
 
 ```go
 // Shape only. No generics, stdlib only.
-func CreateConfig() *map[string]any
+func CreateConfig() *map[string]interface{}
 
-func New(ctx context.Context, next http.Handler, cfg *map[string]any, name string) (http.Handler, error)
+func New(ctx context.Context, next http.Handler, cfg *map[string]interface{}, name string) (http.Handler, error)
 
 type policy struct {
 	SchemaVersion         int                   `json:"schemaVersion"`         // must be 1
@@ -134,13 +165,20 @@ type constraint struct {
 ```
 
 Semantic checks (error from `New`): schema version other than 1; empty `app`, `trustedIssuers` or
-`identityPrefix`; `identityPrefix` not ending in `:`; any malformed fingerprint or identity; duplicates in any
-list; an identity or constraint key outside `identityPrefix`; a constraint with an empty method or path list;
-`stripHeaders: false`. `New` must not perform network or filesystem access.
+`identityPrefix`; a prefix other than a full `urn:noqer:mtls:<profile>:` namespace; any malformed fingerprint or identity; duplicates in any
+list; an identity or constraint key outside `identityPrefix`; a constraint key absent from
+`identities`; a constraint with an empty method or path list;
+`stripHeaders: false`.
+Methods are the nine standard uppercase HTTP methods. Canonical literal paths allow
+`/` as the root exception to the trailing-slash rule, and reject query/fragment,
+backslash and spellings that need percent-encoding on the wire. A nonempty fingerprint `expires` must be
+a valid `YYYY-MM-DD` date; it never automatically removes a block. A nonempty
+forwarded header must be a valid `X-Mtls-*` HTTP header token with a non-empty suffix. `New` must not perform network or filesystem access.
 
-Example dynamic configuration (Kubernetes Middleware shown; the file provider form is identical under
-`http.middlewares.<name>.plugin.traefik-mtls-authz`). Note that `identityPrefix` ends in a colon and must be
-quoted in YAML.
+Recommended Kubernetes configuration uses `policyJSON` too. For file-provider
+configuration, use the same serialized object under
+`http.middlewares.<name>.plugin.traefik-mtls-authz.policyJSON` as shown in the README.
+The JSON string preserves integer and boolean types across provider parsers.
 
 ```yaml
 apiVersion: traefik.io/v1alpha1
@@ -151,25 +189,32 @@ metadata:
 spec:
   plugin:
     traefik-mtls-authz:
-      policy:
-        schemaVersion: 1
-        app: sonarr
-        policyRevision: "1-3f9c2a1b"
-        trustedIssuers:
-          - "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-        identityPrefix: "urn:noqer:mtls:clients:"
-        identities:
-          - urn:noqer:mtls:clients:z-mac
-          - urn:noqer:mtls:clients:z-arch
-          - urn:noqer:mtls:clients:gatus-cluster-1
-        disabledIdentities: []
-        blockedFingerprints:
-          - fingerprint: "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
-            note: "z-mac leaf lost 2026-11-02"
-            expires: "2027-10-28"
-        constraints: {}
-        stripHeaders: true
-        forwardIdentityHeader: ""
+      policyJSON: |
+        {
+          "schemaVersion": 1,
+          "app": "sonarr",
+          "policyRevision": "1-3f9c2a1b",
+          "trustedIssuers": [
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+          ],
+          "identityPrefix": "urn:noqer:mtls:clients:",
+          "identities": [
+            "urn:noqer:mtls:clients:z-mac",
+            "urn:noqer:mtls:clients:z-arch",
+            "urn:noqer:mtls:clients:gatus-cluster-1"
+          ],
+          "disabledIdentities": [],
+          "blockedFingerprints": [
+            {
+              "fingerprint": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+              "note": "z-mac leaf lost 2026-11-02",
+              "expires": "2027-10-28"
+            }
+          ],
+          "constraints": {},
+          "stripHeaders": true,
+          "forwardIdentityHeader": ""
+        }
 ```
 
 A journald-style policy restricts an identity to one method and one exact path:
@@ -183,34 +228,52 @@ metadata:
 spec:
   plugin:
     traefik-mtls-authz:
-      policy:
-        schemaVersion: 1
-        app: journald-upload
-        policyRevision: "1-3f9c2a1b"
-        trustedIssuers:
-          - "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-        identityPrefix: "urn:noqer:mtls:clients:"
-        identities:
-          - urn:noqer:mtls:clients:oci-micro-1
-        disabledIdentities: []
-        blockedFingerprints: []
-        constraints:
-          urn:noqer:mtls:clients:oci-micro-1:
-            methods: [POST]
-            paths: [/insert/journald/upload]
-        stripHeaders: true
-        forwardIdentityHeader: ""
+      policyJSON: |
+        {
+          "schemaVersion": 1,
+          "app": "journald-upload",
+          "policyRevision": "1-3f9c2a1b",
+          "trustedIssuers": [
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+          ],
+          "identityPrefix": "urn:noqer:mtls:clients:",
+          "identities": [
+            "urn:noqer:mtls:clients:oci-micro-1"
+          ],
+          "disabledIdentities": [],
+          "blockedFingerprints": [],
+          "constraints": {
+            "urn:noqer:mtls:clients:oci-micro-1": {
+              "methods": [
+                "POST"
+              ],
+              "paths": [
+                "/insert/journald/upload"
+              ]
+            }
+          },
+          "stripHeaders": true,
+          "forwardIdentityHeader": ""
+        }
 ```
 
 Every fenced YAML block in this file and in `README.md` is parsed by `scripts/check_docs_yaml.py`
-(`make check/docs`, also run in CI), which additionally checks the shape of `traefik-mtls-authz` policy blocks.
+(`make check/docs`, also run in CI), which additionally checks the shape of `traefik-mtls-authz` policy blocks
+and the catalog testData, including JSON-envelope syntax.
 
 ## 6. Logging
 
-Allow decisions go to `os.Stdout` (DEBUG, R10). Every deny and every `New` outcome goes to `os.Stderr`
-(visible at INFO) as one `key=value` line: `event`, `reason`, `app`, `policyRevision`, `router` (the middleware
+Allow decisions use `fmt.Print` through Yaegi's interpreter stdout (DEBUG, R10).
+Deny and constructor decisions use a private `log.Logger` backed by the virtualized
+`log.Writer()` (Traefik ERROR, visible at INFO). Both paths respect Traefik's JSON
+format, file destination and plugin metadata. Direct OS file-descriptor writes are
+avoided. Each decision is emitted as one `key=value` line: `event`, `reason`, `app`, `policyRevision`, `router` (the middleware
 name Traefik passes to `New`), `identity` when parsed, `leafFp` and `anchorFp` (first 16 hex), `tlsVersion`,
-`sni`, `host`, `method`, `path`. Never certificate bodies, never full headers.
+`sni`, `host`, `method`, `path`. Request-only fields are omitted from constructor
+logs; invalid policies may have empty app/revision fields. Values are quoted to
+prevent multiline injection. The logged identity is capped at 128 bytes plus a
+`[truncated]` suffix, even for malformed or overlong certificate SANs. Never
+certificate bodies, full headers or URL queries.
 
 Traefik's access log already records `TLSClientSubject` and the router name, and a 403 from the plugin is
 counted in `traefik_router_requests_total`. That is the metrics path.
@@ -239,6 +302,9 @@ counted in `traefik_router_requests_total`. That is the metrics path.
 ## 8. Known limits
 
 - No revocation protocol. The blocklist and CA withdrawal are the only revocation mechanisms.
+- Identity-header stripping applies to the initial HTTP header section only. The
+  plugin does not read bodies or filter trailers populated later during streaming;
+  backends must obtain identity from the verified initial header, not trailer fields.
 - Withdrawal does not terminate established WebSockets or in-flight uploads; the operator must close the
   connection (Traefik restart or backend stop).
 - A certificate, or a CA in its chain, that expires mid-connection is denied on its next request (step 5),
@@ -285,16 +351,22 @@ Authorization on `app-a.test`:
 
 - no certificate and wrong CA fail the handshake;
 - valid but unenrolled identity -> 403 with the reason header; enrolled -> 200;
-- two URI SANs -> 403; URI plus DNS SAN -> 403;
+- two URI SANs -> 403; URI plus DNS or registeredID SAN -> 403 `identity_ambiguous`;
+- URI plus unknown GeneralName tag 9 -> 403 `identity_invalid`;
+- raw uppercase `URN:` -> 403 `identity_invalid`;
 - blocked fingerprint -> 403; disabled identity -> 403; expired leaf -> handshake failure;
 - CA expiry on an established connection: handshake while the CA is valid, advance the fixture clock (or use
   a CA whose `NotAfter` is seconds away), second request on the same keep-alive connection -> 403 `cert_time`;
 - TLS 1.2 and TLS 1.3;
-- resumed session with tickets enabled (`openssl s_client -sess_out/-sess_in`) -> same decision (A2);
+- resumed session with tickets enabled (Go TLS `ClientSessionCache` plus `DidResume`
+  assertions, with both allowed and denied identities) -> same decision (A2);
 - tickets disabled -> no ticket issued, full handshake (A3);
 - WebSocket upgrade allowed and denied; chunked streaming POST allowed;
 - policy change while a WebSocket is open -> stream survives, next request denied;
-- stderr deny lines present at Traefik log level INFO.
+- deny/load lines present at Traefik log level INFO with ERROR/plugin metadata;
+- JSON file logging captures load and deny decisions, with no raw console copies;
+- encoded separators on constrained routes -> 403 `constraint_path`; normalized
+  unreserved characters reach the backend only under the canonical allowed path.
 
 SNI check, always with distinct SNI and Host names:
 
@@ -329,9 +401,11 @@ check is the mitigation):
 
 Process-level:
 
-- broken plugin directory -> Traefik exits with `abortOnPluginFailure`.
+- missing plugin manifest -> Traefik exits with `abortOnPluginFailure`;
+- valid manifest with Go source that fails Yaegi compilation -> Traefik exits too;
+  this test mounts a separate temporary source directory and never edits the working plugin.
 
-Acceptance before any production route: A1 (R12 behavior inside Traefik v3.7.14 itself), A2, A3,
+Acceptance before any production route: A1 (strict configuration through the actual provider, R12/R13), A2, A3,
 A4 (both TLS versions), A5 (PROXY protocol v2 path leaves `req.TLS` intact) all pass in CI, and
 `make check/docs` passes.
 
@@ -347,7 +421,7 @@ after fixing. Operators pin `version` and `hash` (R11). Record the archive hash 
 | # | Decision | Effect here |
 |---|---|---|
 | D1 | Plugin catalog delivery | Section 10; `testData` must be a full policy |
-| D2 | Strict configuration: raw-map `CreateConfig`, outer and nested unknown keys rejected, policy type checked | Section 5 |
+| D2 | Strict configuration: raw-map `CreateConfig`, outer and nested unknown keys rejected, policy type checked; `policyJSON` preserves types across file-provider coercion | Section 5, R13 |
 | D5 | Session tickets stay disabled on the TLSOption | R7/R8 are the only connection-state cases; per-request chain-wide checks still required |
 | D9 | No identity header forwarded by default | `forwardIdentityHeader: ""` |
 
@@ -359,3 +433,47 @@ through the typed-struct config, fixed by the raw-map config in section 5 and ve
 added to section 9; (3) validity is now checked for every certificate in the chain (step 5), with a CA-expiry
 case in unit and integration tests; (4) `identityPrefix` examples quoted, fenced YAML validated by
 `scripts/check_docs_yaml.py`.
+
+2026-10-30 implementation verification: real file-provider loading disproved the
+end-to-end interpretation of R12. Added R13 and the strict `policyJSON` transport
+rather than accepting weak scalar types. Native-object policy validation remains
+strict. The package name was aligned with Traefik's default import name
+(`traefik_mtls_authz`), and JSON token switching uses an explicit `json.Delim` type
+assertion to avoid a Yaegi v0.16.1 interface conversion panic. Direct stdout writes
+were also found to bypass Traefik's DEBUG filter; allows use interpreter stdout.
+Tests run actual Traefik v3.7.14 by digest, and all runtime acceptance cases pass
+locally. CI is configured to run the same suite; a hosted CI result still requires
+pushing the change.
+
+
+2026-10-30 independent review follow-up: deny/load logs now use a private logger
+backed by Yaegi's virtualized `log.Writer()`, with real JSON/file-sink regressions.
+The SAN extension's raw IA5 URI bytes are compared before authorization, rejecting
+upper/mixed-case schemes that `net/url` silently lowercases; `encoding/asn1` is
+exercised inside real Yaegi. Prefixes now require a full profile namespace and
+forwarded headers require the dedicated `X-Mtls-*` namespace. Every deployment
+example uses `policyJSON` because native CRD-policy loading remains unverified.
+Traefik v3.7.14 permits encoded separators by default, so constrained policies also
+require the middleware-visible escaped path to equal its literal path. Traefik's
+normalization of unreserved characters is tested against the backend's RequestURI.
+
+
+2026-10-30 Astra review follow-up: raw SAN validation now counts every GeneralName,
+rejecting all additional entries including those ignored by Go's x509 parser.
+An enrolled URI plus registeredID (tag 8) is denied `identity_ambiguous`; an enrolled
+URI plus unknown tag 9 is denied `identity_invalid`. Unit tests check ignored SANs
+in both orders; real-Traefik tests issue and verify both certificate variants.
+The previously missing normalization regression now sends `%75pload` and dot-segment
+variants and asserts the exact backend `X-Test-Backend-URI` on both TLS versions.
+
+
+2026-10-30 Fable review follow-up (no blocking findings): constraints now require
+keys in the application's enrolled `identities`, preventing typoed rules from
+silently leaving an enrolled identity unconstrained. Invalid raw URI identities
+are capped at 128 bytes plus a marker in request logs. CI formatting and vet checks
+now include the integration-tagged harness. Checked-in real-Traefik regressions
+cover HTTP/2 (with ALPN/protocol assertions) over TLS 1.2 and 1.3, both enabled and
+disabled identity forwarding, and isolated Yaegi compile failure. The native policy
+transport stays supported for direct callers; `policyJSON` remains recommended for
+all provider deployments. Trailer filtering remains outside this no-body-access
+middleware; the initial-header scope is now explicit.

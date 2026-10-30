@@ -1,7 +1,8 @@
 # AGENTS.md
 
 This repository is a Traefik middleware plugin for per-application mTLS authorization.
-v0.1.0 is a deny-all skeleton, not a usable authorization implementation.
+The v0.1.1 implementation replaces the historical v0.1.0 deny-all skeleton.
+Local acceptance tests do not imply a production deployment.
 
 Run `make tidy`, `make lint`, and `make test` before committing. Run `make check/docs`
 after editing fenced YAML in docs/ or README.md.
@@ -10,7 +11,7 @@ real Traefik loading before claiming production compatibility.
 
 The implementation design is in docs/design.md; follow it.
 
-Security contracts for future implementation:
+Security contracts:
 - Native Traefik RequireAndVerifyClientCert performs certificate validation.
 - Require verified TLS state; never accept client identity from HTTP headers.
 - Authorize exact enrolled URI SAN identities per application; default deny.
