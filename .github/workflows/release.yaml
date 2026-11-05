@@ -1,24 +1,39 @@
-name: Release
-on:
+name: Publish
+'on':
   push:
-    tags: ['v*']
+    tags:
+      - v*
 permissions:
   contents: read
+concurrency:
+  group: publish-${{ github.repository }}
+  cancel-in-progress: false
 jobs:
+  decide:
+    uses: zekihan/release-workflows/.github/workflows/decide.yaml@2f43b18296123d62f69e1cd3be25bc50f8de7645 # main
+    permissions:
+      contents: read
+      actions: read
+      packages: read
+    with:
+      mode: ${{ startsWith(github.ref, 'refs/tags/') && 'release' || 'edge' }}
   checks:
+    needs: decide
+    if: ${{ needs.decide.outputs.build == 'true' }}
     uses: ./.github/workflows/pr.yaml
+    permissions:
+      contents: read
+    with:
+      publishing: true
   release:
-    needs: checks
-    runs-on: ubuntu-latest
+    needs:
+      - decide
+      - checks
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    uses: zekihan/release-workflows/.github/workflows/release.yaml@2f43b18296123d62f69e1cd3be25bc50f8de7645 # main
     permissions:
       contents: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Verify version
-        run: test "$GITHUB_REF_NAME" = "v$(cat VERSION)"
-      - name: Publish source release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file .github/release-notes.md
+      packages: write
+    with:
+      version: ${{ needs.decide.outputs.version }}
+      binaries: false
