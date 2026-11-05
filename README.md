@@ -181,3 +181,5 @@ Never substitute the hash of GitHub's source zip for the catalog archive hash.
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+Publishing and manual recovery: [Publishing](docs/publishing.md).
