@@ -6,6 +6,7 @@ tidy:
 
 lint:
 	test -z "$$(gofmt -l testing)"
+	golangci-lint run --build-tags=integration ./...
 	go vet ./...
 	go vet -tags integration ./testing
 

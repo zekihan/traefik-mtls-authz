@@ -279,7 +279,7 @@ func TestNewRejectsMalformedPolicy(t *testing.T) {
 			t.Fatalf("accepted %T", raw)
 		}
 	}
-	for _, cfg := range []*map[string]interface{}{nil, CreateConfig(), &map[string]interface{}{"other": true}, &map[string]interface{}{"policy": map[string]interface{}{}, "constraints": map[string]interface{}{}}} {
+	for _, cfg := range []*map[string]interface{}{nil, CreateConfig(), {"other": true}, {"policy": map[string]interface{}{}, "constraints": map[string]interface{}{}}} {
 		if _, err := New(context.Background(), http.NotFoundHandler(), cfg, "test"); err == nil {
 			t.Fatal("accepted invalid outer block")
 		}
