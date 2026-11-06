@@ -227,7 +227,7 @@ func (p policy) validate() error {
 		for _, path := range rule.Paths {
 			u, err := url.ParseRequestURI(path)
 			if err != nil || !strings.HasPrefix(path, "/") || (path != "/" && strings.HasSuffix(path, "/")) || strings.Contains(path, "//") || strings.Contains(path, "..") || strings.ContainsAny(path, "?#\\") || u.Path != path || u.EscapedPath() != path {
-				return fmt.Errorf("constraint paths must be absolute exact decoded paths without trailing slash, // or ..")
+				return fmt.Errorf("constraint paths must be absolute exact decoded paths without trailing slash, repeated slash, or parent-directory markers")
 			}
 		}
 	}
