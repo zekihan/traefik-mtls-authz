@@ -13,7 +13,8 @@ import (
 // path, query, SNI) and certificate URI bytes into a denied request.
 // Properties: the deny log is exactly one line; the query string, request
 // headers and full fingerprints never appear; the identity field is bounded to
-// 128 bytes plus the truncation marker; the response is the fixed 403.
+// 128 bytes plus the truncation marker; the whole line is linear in the
+// request size; the response is the fixed 403.
 func FuzzDecisionLog(f *testing.F) {
 	quietFuzzLogs(f)
 	f.Add("GET", "app.test", "/path", "secret=1", "app.test", testIdentity)
@@ -63,6 +64,12 @@ func FuzzDecisionLog(f *testing.F) {
 		quoted := line[start+len(" identity=") : end]
 		if len(quoted) > 4*128+len(`"[truncated]"`)+2 {
 			t.Fatalf("identity log field unbounded: %d bytes", len(quoted))
+		}
+		// Host, path, method and SNI are deliberately not truncated (design
+		// section 6); %q may expand each byte to at most 4 bytes, so the line
+		// stays linear in the attacker-controlled request size.
+		if bound := 4*(len(method)+len(host)+len(path)+len(sni)+128+len("[truncated]")) + 1024; len(line) > bound {
+			t.Fatalf("deny log grew superlinearly: %d bytes > %d", len(line), bound)
 		}
 	})
 }
