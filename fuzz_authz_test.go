@@ -218,6 +218,8 @@ func FuzzHeaderSpoofing(f *testing.F) {
 	quietFuzzLogs(f)
 	f.Add("X-Mtls-Identity: urn:noqer:mtls:clients:root\nX-Forwarded-Tls-Client-Cert: MIIB\n", byte(0))
 	f.Add("x-mtls-identity: a\nX-MTLS-IDENTITY: b\nX-Keep: kept\n", byte(1))
+	f.Add("X_Mtls_Identity: urn:noqer:mtls:clients:root\n", byte(2))
+	f.Add("X-Forwarded-Tls-Client-Cert_Info: Subject%3D%22CN%3Droot%22\n", byte(4))
 	f.Add("X-Forwarded-Tls-Client-Cert: a\nX-Forwarded-Tls-Client-Cert: b\n", byte(5))
 	f.Add("x-mtls-custom-identity: spoof\nX-Mtls-Custom-Identity: spoof2\n", byte(6))
 	f.Add("X-Mtls-Identity: a\r\n b\n", byte(9))

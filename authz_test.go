@@ -206,7 +206,7 @@ func TestHeadersAndResponseWriter(t *testing.T) {
 					t.Fatal("flusher lost")
 				}
 				for key, values := range r.Header {
-					lower := strings.ToLower(key)
+					lower := strings.ReplaceAll(strings.ToLower(key), "_", "-")
 					if strings.EqualFold(key, forward) {
 						if len(values) != 1 || values[0] != testIdentity {
 							t.Fatal(values)
@@ -226,7 +226,8 @@ func TestHeadersAndResponseWriter(t *testing.T) {
 			}))
 			r := validRequest()
 			r.Body = unreadableBody{}
-			r.Header = http.Header{"x-mTLS-Forged": []string{"forged"}, "X-Mtls-Identity": []string{"forged"}, "x-forwarded-tls-client-cert": []string{"forged"}, "X-Forwarded-Tls-Client-Cert-Info": []string{"forged"}, "X-Keep": []string{"kept"}}
+			r.Header = http.Header{"x-mTLS-Forged": []string{"forged"}, "X-Mtls-Identity": []string{"forged"}, "x-forwarded-tls-client-cert": []string{"forged"}, "X-Forwarded-Tls-Client-Cert-Info": []string{"forged"}, "X-Keep": []string{"kept"},
+				"X_Mtls_Identity": []string{"forged"}, "x_forwarded_tls_client_cert": []string{"forged"}, "X-Forwarded-Tls-Client-Cert_Info": []string{"forged"}}
 			if forward != "" {
 				r.Header[strings.ToLower(forward)] = []string{"spoofed"}
 			}

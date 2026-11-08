@@ -177,8 +177,10 @@ func (m *Middleware) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	// Header.Del alone misses noncanonical keys from another middleware.
+	// CGI-style backends read X_Mtls_Identity as HTTP_X_MTLS_IDENTITY, so an
+	// underscore is treated as a hyphen.
 	for key := range req.Header {
-		lower := strings.ToLower(key)
+		lower := strings.ReplaceAll(strings.ToLower(key), "_", "-")
 		if strings.HasPrefix(lower, "x-mtls-") || lower == "x-forwarded-tls-client-cert" || lower == "x-forwarded-tls-client-cert-info" {
 			delete(req.Header, key)
 		}

@@ -1,0 +1,3 @@
+go test fuzz v1
+string("X-Forwarded-Tls-Client-Cert_Info: Subject%3D%22CN%3Droot%22\n")
+byte('\x04')
