@@ -19,6 +19,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -923,7 +924,7 @@ func TestPluginLoadFailure(t *testing.T) {
 	static["experimental"].(object)["localPlugins"].(object)["traefik-mtls-authz"].(object)["moduleName"] = "invalid.example/missing-plugin"
 	writeJSON(t, path, static)
 	output, err := f.compose("up", "--abort-on-container-exit", "--exit-code-from", "traefik")
-	if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 1 || !bytes.Contains(output, []byte("failed to open the plugin manifest")) {
+	if exit := (*exec.ExitError)(nil); !errors.As(err, &exit) || exit.ExitCode() != 1 || !bytes.Contains(output, []byte("failed to open the plugin manifest")) {
 		t.Fatalf("plugin failure must exit nonzero: %v\n%s", err, output)
 	}
 }
@@ -1132,7 +1133,7 @@ func TestPluginCompileFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	output, err := f.compose("up", "--abort-on-container-exit", "--exit-code-from", "traefik")
-	if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 1 || !bytes.Contains(output, []byte("failed to create plugin builder")) || !bytes.Contains(output, []byte("failed to import plugin code")) || !bytes.Contains(output, []byte("broken.go")) {
+	if exit := (*exec.ExitError)(nil); !errors.As(err, &exit) || exit.ExitCode() != 1 || !bytes.Contains(output, []byte("failed to create plugin builder")) || !bytes.Contains(output, []byte("failed to import plugin code")) || !bytes.Contains(output, []byte("broken.go")) {
 		t.Fatalf("Yaegi compile failure must exit nonzero: %v\n%s", err, output)
 	}
 }
