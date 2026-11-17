@@ -11,17 +11,19 @@ import (
 )
 
 type policy struct {
-	SchemaVersion         int                   `json:"schemaVersion"`
-	App                   string                `json:"app"`
-	PolicyRevision        string                `json:"policyRevision"`
-	TrustedIssuers        []string              `json:"trustedIssuers"`
-	IdentityPrefix        string                `json:"identityPrefix"`
-	Identities            []string              `json:"identities"`
-	DisabledIdentities    []string              `json:"disabledIdentities"`
-	BlockedFingerprints   []blockedFingerprint  `json:"blockedFingerprints"`
-	Constraints           map[string]constraint `json:"constraints"`
-	StripHeaders          *bool                 `json:"stripHeaders"`
-	ForwardIdentityHeader string                `json:"forwardIdentityHeader"`
+	SchemaVersion            int                   `json:"schemaVersion"`
+	App                      string                `json:"app"`
+	PolicyRevision           string                `json:"policyRevision"`
+	TrustedIssuers           []string              `json:"trustedIssuers"`
+	IdentityPrefix           string                `json:"identityPrefix"`
+	Identities               []string              `json:"identities"`
+	DisabledIdentities       []string              `json:"disabledIdentities"`
+	BlockedFingerprints      []blockedFingerprint  `json:"blockedFingerprints"`
+	Constraints              map[string]constraint `json:"constraints"`
+	StripHeaders             *bool                 `json:"stripHeaders"`
+	ForwardIdentityHeader    string                `json:"forwardIdentityHeader"`
+	ForwardFingerprintHeader string                `json:"forwardFingerprintHeader"`
+	ForwardNotAfterHeader    string                `json:"forwardNotAfterHeader"`
 }
 
 type blockedFingerprint struct {
@@ -99,7 +101,7 @@ func checkShape(obj map[string]interface{}, kind string) error {
 			switch key {
 			case "schemaVersion":
 				fieldKind = "number"
-			case "app", "policyRevision", "identityPrefix", "forwardIdentityHeader":
+			case "app", "policyRevision", "identityPrefix", "forwardIdentityHeader", "forwardFingerprintHeader", "forwardNotAfterHeader":
 				fieldKind = "string"
 			case "trustedIssuers", "identities", "disabledIdentities":
 				fieldKind = "strings"
@@ -234,8 +236,23 @@ func (p policy) validate() error {
 	if p.StripHeaders != nil && !*p.StripHeaders {
 		return fmt.Errorf("stripHeaders cannot be false")
 	}
-	if p.ForwardIdentityHeader != "" && (!validHeader(p.ForwardIdentityHeader) || !strings.HasPrefix(strings.ToLower(p.ForwardIdentityHeader), "x-mtls-") || len(p.ForwardIdentityHeader) <= len("X-Mtls-")) {
-		return fmt.Errorf("forwardIdentityHeader must be a valid X-Mtls-* header token with a non-empty suffix")
+	forwards := []struct{ name, value string }{
+		{"forwardIdentityHeader", p.ForwardIdentityHeader},
+		{"forwardFingerprintHeader", p.ForwardFingerprintHeader},
+		{"forwardNotAfterHeader", p.ForwardNotAfterHeader},
+	}
+	for i, f := range forwards {
+		if f.value == "" {
+			continue
+		}
+		if !validHeader(f.value) || !strings.HasPrefix(strings.ToLower(f.value), "x-mtls-") || len(f.value) <= len("X-Mtls-") {
+			return fmt.Errorf("%s must be a valid X-Mtls-* header token with a non-empty suffix", f.name)
+		}
+		for _, other := range forwards[:i] {
+			if strings.EqualFold(f.value, other.value) {
+				return fmt.Errorf("%s and %s must not use the same header", other.name, f.name)
+			}
+		}
 	}
 	return nil
 }

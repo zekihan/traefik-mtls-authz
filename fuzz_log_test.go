@@ -25,7 +25,7 @@ func FuzzDecisionLog(f *testing.F) {
 		if strings.Contains(method+host+path+sni+identity, marker) {
 			t.Skip()
 		}
-		m := fuzzAllowMiddleware(t, "", nil, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		m := fuzzAllowMiddleware(t, "", "", "", nil, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 			t.Fatal("denied request reached next")
 		}))
 		m.identities = map[string]bool{} // force a deny after identity extraction

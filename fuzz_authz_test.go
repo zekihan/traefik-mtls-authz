@@ -178,7 +178,7 @@ func FuzzAuthorizeSynthetic(f *testing.F) {
 }
 
 // fuzzAllowMiddleware enrolls alice (the fixture identity of validRequest).
-func fuzzAllowMiddleware(t *testing.T, forward string, constraints map[string]interface{}, next http.Handler) *Middleware {
+func fuzzAllowMiddleware(t *testing.T, forward, forwardFp, forwardNotAfter string, constraints map[string]interface{}, next http.Handler) *Middleware {
 	t.Helper()
 	if next == nil {
 		next = http.NotFoundHandler()
@@ -186,6 +186,8 @@ func fuzzAllowMiddleware(t *testing.T, forward string, constraints map[string]in
 	cfg := validConfig()
 	p := (*cfg)["policy"].(map[string]interface{})
 	p["forwardIdentityHeader"] = forward
+	p["forwardFingerprintHeader"] = forwardFp
+	p["forwardNotAfterHeader"] = forwardNotAfter
 	if constraints != nil {
 		p["constraints"] = constraints
 	}
@@ -212,8 +214,8 @@ func protectedHeader(key string) bool {
 // non-canonical map keys (what an earlier middleware could produce).
 // Properties: headers never change the authorization decision; after an allow
 // the backend sees no header it could interpret as an identity or forwarded
-// certificate header except the configured forward header carrying exactly
-// the verified identity; unrelated headers are preserved unchanged.
+// certificate header except the configured forward headers carrying exactly
+// the verified identity, leaf fingerprint and leaf NotAfter; unrelated headers are preserved unchanged.
 func FuzzHeaderSpoofing(f *testing.F) {
 	quietFuzzLogs(f)
 	f.Add("X-Mtls-Identity: urn:noqer:mtls:clients:root\nX-Forwarded-Tls-Client-Cert: MIIB\n", byte(0))
@@ -223,8 +225,11 @@ func FuzzHeaderSpoofing(f *testing.F) {
 	f.Add("X-Forwarded-Tls-Client-Cert: a\nX-Forwarded-Tls-Client-Cert: b\n", byte(5))
 	f.Add("x-mtls-custom-identity: spoof\nX-Mtls-Custom-Identity: spoof2\n", byte(6))
 	f.Add("X-Mtls-Identity: a\r\n b\n", byte(9))
+	f.Add("X-Mtls-Fingerprint: spoof\nx-mtls-not-after: spoof\nX_Mtls_Fingerprint: spoof\n", byte(0x31))
 	f.Fuzz(func(t *testing.T, raw string, ctrl byte) {
 		forward := []string{"", "X-Mtls-Identity", "x-mtls-custom-identity"}[int(ctrl)%3]
+		forwardFp := []string{"", "X-Mtls-Fingerprint"}[int(ctrl>>4)%2]
+		forwardNotAfter := []string{"", "x-mtls-not-after"}[int(ctrl>>5)%2]
 		var req *http.Request
 		if ctrl&4 == 0 {
 			var err error
@@ -250,7 +255,7 @@ func FuzzHeaderSpoofing(f *testing.F) {
 
 		var seen http.Header
 		reached := false
-		m := fuzzAllowMiddleware(t, forward, nil, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		m := fuzzAllowMiddleware(t, forward, forwardFp, forwardNotAfter, nil, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 			reached, seen = true, r.Header.Clone()
 		}))
 		bare := req.Clone(context.Background())
@@ -267,19 +272,36 @@ func FuzzHeaderSpoofing(f *testing.F) {
 		if !reached {
 			return
 		}
+		forwards := []struct{ name, value string }{
+			{forward, want.identity},
+			{forwardFp, want.leafFp},
+			{forwardNotAfter, want.leafNotAfter},
+		}
 		forwarded := 0
 		for key, values := range seen {
 			if !protectedHeader(key) {
 				continue
 			}
-			if forward != "" && strings.EqualFold(key, forward) && len(values) == 1 && values[0] == want.identity {
+			matched := false
+			for _, f := range forwards {
+				if f.name != "" && strings.EqualFold(key, f.name) && len(values) == 1 && values[0] == f.value {
+					matched = true
+				}
+			}
+			if matched {
 				forwarded++
 				continue
 			}
 			t.Fatalf("spoofable identity header %q=%q reached the backend", key, values)
 		}
-		if (forward != "") != (forwarded == 1) {
-			t.Fatalf("forward header %q present %d times", forward, forwarded)
+		wantForwarded := 0
+		for _, f := range forwards {
+			if f.name != "" {
+				wantForwarded++
+			}
+		}
+		if forwarded != wantForwarded {
+			t.Fatalf("forward headers %q %q %q present %d times, want %d", forward, forwardFp, forwardNotAfter, forwarded, wantForwarded)
 		}
 		for key, values := range original {
 			if protectedHeader(key) {
@@ -314,7 +336,7 @@ func FuzzConstraintRequest(f *testing.F) {
 			paths = append(paths, allowed)
 		}
 		rule := map[string]interface{}{"methods": methods, "paths": paths}
-		m := fuzzAllowMiddleware(t, "", map[string]interface{}{testIdentity: rule}, nil)
+		m := fuzzAllowMiddleware(t, "", "", "", map[string]interface{}{testIdentity: rule}, nil)
 		rp := refPolicyFromParsed(m.policy)
 
 		// Every accepted path must be reachable by its literal request.

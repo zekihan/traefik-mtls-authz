@@ -244,6 +244,7 @@ func TestNewRejectsMalformedPolicy(t *testing.T) {
 		"bad-identity": "{\"identities\":[\"urn:noqer:mtls:clients:Alice\"]}", "outside-prefix": "{\"disabledIdentities\":[\"urn:noqer:mtls:other:alice\"]}",
 		"null-constraint": "{\"constraints\":{\"urn:noqer:mtls:clients:alice\":null}}", "unknown-constraint": "{\"constraints\":{\"urn:noqer:mtls:clients:alice\":{\"method\":[\"GET\"]}}}",
 		"bad-block": "{\"blockedFingerprints\":[{\"fingerprint\":\"x\"}]}", "null-block": "{\"blockedFingerprints\":[null]}", "bad-header": "{\"forwardIdentityHeader\":\"X-Foo\\r\\nX-Bad\"}",
+		"bad-fp-header": "{\"forwardFingerprintHeader\":\"X-Foo\"}", "bad-na-header": "{\"forwardNotAfterHeader\":null}",
 	}
 	for name, patch := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -568,5 +569,69 @@ func TestIdentityLogIsBounded(t *testing.T) {
 	}
 	if buffer.Len() > 2048 || !strings.Contains(buffer.String(), `identity="`+identity[:128]+`[truncated]"`) {
 		t.Fatal("identity log was not bounded", buffer.Len())
+	}
+}
+
+func TestForwardLeafHeaders(t *testing.T) {
+	cfg := validConfig()
+	p := (*cfg)["policy"].(map[string]interface{})
+	p["forwardIdentityHeader"] = "X-Mtls-Mesh-Viewer"
+	p["forwardFingerprintHeader"] = "x-mtls-mesh-fingerprint"
+	p["forwardNotAfterHeader"] = "X-Mtls-Mesh-Not-After"
+	reached := false
+	m := newTestMiddleware(t, cfg, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		reached = true
+		if got := r.Header.Values("X-Mtls-Mesh-Viewer"); len(got) != 1 || got[0] != testIdentity {
+			t.Fatal("identity", got)
+		}
+		if got := r.Header.Values("X-Mtls-Mesh-Fingerprint"); len(got) != 1 || got[0] != fingerprint([]byte("leaf")) {
+			t.Fatal("fingerprint", got)
+		}
+		if got := r.Header.Values("X-Mtls-Mesh-Not-After"); len(got) != 1 || got[0] != "2026-10-30T13:00:00Z" {
+			t.Fatal("not after", got)
+		}
+		if len(r.Header) != 3 {
+			t.Fatal("unexpected headers", r.Header)
+		}
+	}))
+	r := validRequest()
+	r.TLS.PeerCertificates[0].NotAfter = time.Date(2026, 10, 30, 15, 0, 0, 0, time.FixedZone("x", 2*3600))
+	r.TLS.VerifiedChains[0][0] = r.TLS.PeerCertificates[0]
+	r.Header = http.Header{"X-Mtls-Mesh-Fingerprint": []string{"spoof"}, "x-mtls-mesh-not-after": []string{"spoof"}, "X_Mtls_Mesh_Viewer": []string{"spoof"}}
+	m.ServeHTTP(httptest.NewRecorder(), r)
+	if !reached {
+		t.Fatal("request denied")
+	}
+}
+
+func TestForwardHeaderCollisions(t *testing.T) {
+	keys := []string{"forwardIdentityHeader", "forwardFingerprintHeader", "forwardNotAfterHeader"}
+	for i := range keys {
+		for j := range keys {
+			if i >= j {
+				continue
+			}
+			cfg := validConfig()
+			p := (*cfg)["policy"].(map[string]interface{})
+			p[keys[i]], p[keys[j]] = "X-Mtls-Same", "x-mtls-SAME"
+			if _, err := New(context.Background(), http.NotFoundHandler(), cfg, "test"); err == nil {
+				t.Fatalf("accepted %s == %s", keys[i], keys[j])
+			}
+		}
+	}
+	for _, key := range keys[1:] {
+		for _, header := range []string{"Authorization", "X-Custom", "X-Mtls-", "X-Mtls-Bad Name"} {
+			cfg := validConfig()
+			(*cfg)["policy"].(map[string]interface{})[key] = header
+			if _, err := New(context.Background(), http.NotFoundHandler(), cfg, "test"); err == nil {
+				t.Fatalf("accepted %s=%q", key, header)
+			}
+		}
+	}
+	cfg := validConfig()
+	p := (*cfg)["policy"].(map[string]interface{})
+	p["forwardIdentityHeader"], p["forwardFingerprintHeader"], p["forwardNotAfterHeader"] = "X-Mtls-A", "X-Mtls-B", "X-Mtls-C"
+	if _, err := New(context.Background(), http.NotFoundHandler(), cfg, "test"); err != nil {
+		t.Fatal(err)
 	}
 }

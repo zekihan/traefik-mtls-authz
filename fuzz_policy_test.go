@@ -10,7 +10,7 @@ import (
 func seedPolicyDocs() []string {
 	fp := strings.Repeat("ab", 32)
 	good := `{"schemaVersion":1,"app":"test","policyRevision":"rev-1","trustedIssuers":["` + fp + `"],"identityPrefix":"urn:noqer:mtls:clients:","identities":["urn:noqer:mtls:clients:alice"]}`
-	full := `{"schemaVersion":1,"app":"journald-upload","policyRevision":"1-3f9c2a1b","trustedIssuers":["0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"],"identityPrefix":"urn:noqer:mtls:clients:","identities":["urn:noqer:mtls:clients:oci-micro-1","urn:noqer:mtls:clients:z-mac"],"disabledIdentities":["urn:noqer:mtls:clients:z-arch"],"blockedFingerprints":[{"fingerprint":"fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210","note":"lost","expires":"2027-10-28"}],"constraints":{"urn:noqer:mtls:clients:oci-micro-1":{"methods":["POST"],"paths":["/insert/journald/upload"]}},"stripHeaders":true,"forwardIdentityHeader":"X-Mtls-Identity"}`
+	full := `{"schemaVersion":1,"app":"journald-upload","policyRevision":"1-3f9c2a1b","trustedIssuers":["0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"],"identityPrefix":"urn:noqer:mtls:clients:","identities":["urn:noqer:mtls:clients:oci-micro-1","urn:noqer:mtls:clients:z-mac"],"disabledIdentities":["urn:noqer:mtls:clients:z-arch"],"blockedFingerprints":[{"fingerprint":"fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210","note":"lost","expires":"2027-10-28"}],"constraints":{"urn:noqer:mtls:clients:oci-micro-1":{"methods":["POST"],"paths":["/insert/journald/upload"]}},"stripHeaders":true,"forwardIdentityHeader":"X-Mtls-Identity","forwardFingerprintHeader":"X-Mtls-Fingerprint","forwardNotAfterHeader":"X-Mtls-Not-After"}`
 	return []string{
 		good, full,
 		strings.Replace(good, `"app":"test"`, `"app":"test","app":"other"`, 1),
@@ -159,20 +159,20 @@ func canonicalPolicyJSON(t *testing.T, p policy) string {
 // fingerprints, dates, methods, constraint paths and forwarded header).
 func FuzzPolicyFields(f *testing.F) {
 	quietFuzzLogs(f)
-	f.Add("urn:noqer:mtls:clients:", "urn:noqer:mtls:clients:alice", strings.Repeat("a", 64), "2027-01-31", "POST", "/insert/journald/upload", "X-Mtls-Identity", "app")
-	f.Add("urn:noqer:mtls:a-b:", "urn:noqer:mtls:a-b:x--y", strings.Repeat("0", 64), "2024-02-29", "GET", "/", "x-mtls-x", " ")
-	f.Add("urn:noqer:mtls:clients:", "urn:noqer:mtls:clients:ALICE", strings.Repeat("A", 64), "2023-02-29", "get", "/a/../b", "X-Mtls-", "\t")
-	f.Add("URN:noqer:mtls:clients:", "urn:noqer:mtls:clients:alice\n", strings.Repeat("g", 64), "2027-1-31", "CUSTOM", "/a%2fb", "X-Mtls-A\r\nB", " ")
-	f.Add("urn:noqer:mtls::", "urn:noqer:mtls:clients:-a", "", "", "PATCH", "/a[b]", "X-Mtls-ſ", "x")
-	f.Add("urn:noqer:mtls:clients:", "urn:noqer:mtls:clients:"+strings.Repeat("a", 105), strings.Repeat("f", 63), "0000-02-29", "TRACE", "/a;b=c!$&'()*+,:@~", "", "ok")
-	f.Fuzz(func(t *testing.T, prefix, identity, fp, expires, method, path, header, app string) {
+	f.Add("urn:noqer:mtls:clients:", "urn:noqer:mtls:clients:alice", strings.Repeat("a", 64), "2027-01-31", "POST", "/insert/journald/upload", "X-Mtls-Identity", "app", "X-Mtls-Fingerprint", "X-Mtls-Not-After")
+	f.Add("urn:noqer:mtls:a-b:", "urn:noqer:mtls:a-b:x--y", strings.Repeat("0", 64), "2024-02-29", "GET", "/", "x-mtls-x", " ", "X-MTLS-X", "")
+	f.Add("urn:noqer:mtls:clients:", "urn:noqer:mtls:clients:ALICE", strings.Repeat("A", 64), "2023-02-29", "get", "/a/../b", "X-Mtls-", "\t", "", "Authorization")
+	f.Add("URN:noqer:mtls:clients:", "urn:noqer:mtls:clients:alice\n", strings.Repeat("g", 64), "2027-1-31", "CUSTOM", "/a%2fb", "X-Mtls-A\r\nB", " ", "X-Mtls-A", "x-mtls-a")
+	f.Add("urn:noqer:mtls::", "urn:noqer:mtls:clients:-a", "", "", "PATCH", "/a[b]", "X-Mtls-ſ", "x", "X-Mtls-B", "X-Mtls-B")
+	f.Add("urn:noqer:mtls:clients:", "urn:noqer:mtls:clients:"+strings.Repeat("a", 105), strings.Repeat("f", 63), "0000-02-29", "TRACE", "/a;b=c!$&'()*+,:@~", "", "ok", "X-Mtls-Fingerprint", "X-Mtls-Fingerprint")
+	f.Fuzz(func(t *testing.T, prefix, identity, fp, expires, method, path, header, app, fpHeader, naHeader string) {
 		pol := map[string]interface{}{
 			"schemaVersion": 1, "app": app, "trustedIssuers": []string{fp},
 			"identityPrefix": prefix, "identities": []string{identity},
 			"disabledIdentities":    []string{},
 			"blockedFingerprints":   []map[string]string{{"fingerprint": fp, "expires": expires}},
 			"constraints":           map[string]interface{}{identity: map[string][]string{"methods": {method}, "paths": {path}}},
-			"forwardIdentityHeader": header,
+			"forwardIdentityHeader": header, "forwardFingerprintHeader": fpHeader, "forwardNotAfterHeader": naHeader,
 		}
 		data, err := json.Marshal(pol)
 		if err != nil {
@@ -198,6 +198,14 @@ func FuzzPolicyFields(f *testing.F) {
 		if got, want := checkHeaderAlone(header), refForwardHeader(header); got != want {
 			t.Fatalf("forward header %q plugin=%v reference=%v", header, got, want)
 		}
+		for _, h := range []string{fpHeader, naHeader} {
+			if got, want := checkHeaderAlone(h), refForwardHeader(h); got != want {
+				t.Fatalf("forward header %q plugin=%v reference=%v", h, got, want)
+			}
+		}
+		if got, want := checkHeaderSetAlone(header, fpHeader, naHeader), refForwardHeaders(header, fpHeader, naHeader); got != want {
+			t.Fatalf("forward headers %q %q %q plugin=%v reference=%v", header, fpHeader, naHeader, got, want)
+		}
 		if got, want := checkPrefixAlone(prefix), refPrefix(prefix); got != want {
 			t.Fatalf("identityPrefix %q plugin=%v reference=%v", prefix, got, want)
 		}
@@ -221,6 +229,12 @@ func checkPathAlone(path string) bool {
 func checkHeaderAlone(header string) bool {
 	p := baseFieldPolicy()
 	p.ForwardIdentityHeader = header
+	return p.validate() == nil
+}
+
+func checkHeaderSetAlone(identity, fingerprint, notAfter string) bool {
+	p := baseFieldPolicy()
+	p.ForwardIdentityHeader, p.ForwardFingerprintHeader, p.ForwardNotAfterHeader = identity, fingerprint, notAfter
 	return p.validate() == nil
 }
 

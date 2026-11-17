@@ -74,7 +74,7 @@ func fingerprint(raw []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-type decision struct{ reason, identity, leafFp, anchorFp string }
+type decision struct{ reason, identity, leafFp, anchorFp, leafNotAfter string }
 
 func (m *Middleware) authorize(req *http.Request) decision {
 	d := decision{reason: "no_tls"}
@@ -98,6 +98,7 @@ func (m *Middleware) authorize(req *http.Request) decision {
 		return d
 	}
 	d.leafFp = fingerprint(leaf.Raw)
+	d.leafNotAfter = leaf.NotAfter.UTC().Format(time.RFC3339)
 	d.anchorFp = fingerprint(chain[len(chain)-1].Raw)
 	d.reason = "issuer_not_trusted"
 	if !m.issuers[d.anchorFp] {
@@ -185,16 +186,23 @@ func (m *Middleware) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			delete(req.Header, key)
 		}
 	}
-	if m.policy.ForwardIdentityHeader != "" {
+	for _, f := range []struct{ name, value string }{
+		{m.policy.ForwardIdentityHeader, d.identity},
+		{m.policy.ForwardFingerprintHeader, d.leafFp},
+		{m.policy.ForwardNotAfterHeader, d.leafNotAfter},
+	} {
+		if f.name == "" {
+			continue
+		}
 		for key := range req.Header {
-			if strings.EqualFold(key, m.policy.ForwardIdentityHeader) {
+			if strings.EqualFold(key, f.name) {
 				delete(req.Header, key)
 			}
 		}
 		if req.Header == nil {
 			req.Header = make(http.Header)
 		}
-		req.Header.Set(m.policy.ForwardIdentityHeader, d.identity)
+		req.Header.Set(f.name, f.value)
 	}
 	m.logDecision("allow", d, req)
 	m.next.ServeHTTP(w, req)

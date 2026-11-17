@@ -186,6 +186,22 @@ func refForwardHeader(s string) bool {
 	return s == "" || (refHeaderToken(s) && len(s) > len("x-mtls-") && strings.EqualFold(s[:len("x-mtls-")], "x-mtls-"))
 }
 
+// refForwardHeaders applies the per-header rule and requires the non-empty
+// names to be pairwise distinct, ignoring ASCII case.
+func refForwardHeaders(names ...string) bool {
+	for i, a := range names {
+		if !refForwardHeader(a) {
+			return false
+		}
+		for _, b := range names[:i] {
+			if a != "" && strings.EqualFold(a, b) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // ---------------------------------------------------------------------------
 // Strict DER TLV reader (X.690 DER) independent of encoding/asn1.
 
@@ -807,7 +823,7 @@ func refAcceptPolicy(data []byte) (refPolicy, bool) {
 	if !ok || doc.kind != 'o' || !refKeysUnique(doc) {
 		return rp, false
 	}
-	if !refOnlyKeys(doc, "schemaVersion", "app", "policyRevision", "trustedIssuers", "identityPrefix", "identities", "disabledIdentities", "blockedFingerprints", "constraints", "stripHeaders", "forwardIdentityHeader") {
+	if !refOnlyKeys(doc, "schemaVersion", "app", "policyRevision", "trustedIssuers", "identityPrefix", "identities", "disabledIdentities", "blockedFingerprints", "constraints", "stripHeaders", "forwardIdentityHeader", "forwardFingerprintHeader", "forwardNotAfterHeader") {
 		return rp, false
 	}
 	str := func(key string) (string, bool) {
@@ -831,10 +847,12 @@ func refAcceptPolicy(data []byte) (refPolicy, bool) {
 	_, ok2 := str("policyRevision")
 	prefix, ok3 := str("identityPrefix")
 	header, ok4 := str("forwardIdentityHeader")
+	fpHeader, ok8 := str("forwardFingerprintHeader")
+	naHeader, ok9 := str("forwardNotAfterHeader")
 	issuers, ok5 := list("trustedIssuers")
 	ids, ok6 := list("identities")
 	disabled, ok7 := list("disabledIdentities")
-	if !ok1 || !ok2 || !ok3 || !ok4 || !ok5 || !ok6 || !ok7 || strings.TrimSpace(app) == "" || !refPrefix(prefix) || !refForwardHeader(header) {
+	if !ok1 || !ok2 || !ok3 || !ok4 || !ok5 || !ok6 || !ok7 || !ok8 || !ok9 || strings.TrimSpace(app) == "" || !refPrefix(prefix) || !refForwardHeaders(header, fpHeader, naHeader) {
 		return rp, false
 	}
 	if v, ok := doc.get("stripHeaders"); ok && v.kind != 't' {
