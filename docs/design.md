@@ -1,6 +1,6 @@
 # Design: per-application mTLS authorization
 
-Status: implemented for v0.1.1 (2026-10-30), with local real-Traefik acceptance tests.
+Status: implemented for v0.1.1 (2026-10-30), with local real-Traefik acceptance tests; v0.2.0 adds the optional `forwardFingerprintHeader` and `forwardNotAfterHeader`.
 v0.1.0 remains the historical deny-all skeleton; no production deployment is implied.
 Target runtime: Traefik v3.7.14 (yaegi v0.16.1, Go 1.26 module), Go standard library only, no generics.
 Deployment, GitOps policy distribution, PKI, DNS and migration details live in the argocd repository.
@@ -80,7 +80,11 @@ Per request. No body access. The handler never wraps the ResponseWriter, so `htt
     decoded path. Traefik normalizes unreserved encodings before this check and
     forwards that same normalized spelling to the backend.
 11. Delete inbound `X-Forwarded-Tls-Client-Cert`, `X-Forwarded-Tls-Client-Cert-Info` and every `X-Mtls-*`
-    header. If `forwardIdentityHeader` is set, set that header to the identity.
+    header. For each of `forwardIdentityHeader`, `forwardFingerprintHeader` and
+    `forwardNotAfterHeader` that is set, delete any inbound header of that name
+    (case-insensitively) and set it to, respectively, the identity, the leaf
+    fingerprint (lowercase hex SHA-256 of the leaf DER, the value matched against
+    `blockedFingerprints`) and the leaf `NotAfter` (RFC 3339, UTC).
 12. `next.ServeHTTP(rw, req)`.
 
 Authorization happens once per HTTP request. A WebSocket is authorized at its Upgrade request; a streaming
@@ -150,6 +154,8 @@ type policy struct {
 	Constraints           map[string]constraint `json:"constraints"`           // key = identity URI
 	StripHeaders          *bool                 `json:"stripHeaders"`          // default true; explicit false is rejected
 	ForwardIdentityHeader string                `json:"forwardIdentityHeader"` // "" = off
+	ForwardFingerprintHeader string             `json:"forwardFingerprintHeader"` // "" = off; leaf SHA-256 fingerprint
+	ForwardNotAfterHeader string                `json:"forwardNotAfterHeader"` // "" = off; leaf NotAfter, RFC 3339 UTC
 }
 
 type blockedFingerprint struct {
@@ -173,7 +179,9 @@ Methods are the nine standard uppercase HTTP methods. Canonical literal paths al
 `/` as the root exception to the trailing-slash rule, and reject query/fragment,
 backslash and spellings that need percent-encoding on the wire. A nonempty fingerprint `expires` must be
 a valid `YYYY-MM-DD` date; it never automatically removes a block. A nonempty
-forwarded header must be a valid `X-Mtls-*` HTTP header token with a non-empty suffix. `New` must not perform network or filesystem access.
+forwarded header (`forwardIdentityHeader`, `forwardFingerprintHeader`, `forwardNotAfterHeader`) must be a valid
+`X-Mtls-*` HTTP header token with a non-empty suffix, and no two of the three may name the same header,
+compared case-insensitively. `New` must not perform network or filesystem access.
 
 Recommended Kubernetes configuration uses `policyJSON` too. For file-provider
 configuration, use the same serialized object under
@@ -213,7 +221,9 @@ spec:
           ],
           "constraints": {},
           "stripHeaders": true,
-          "forwardIdentityHeader": ""
+          "forwardIdentityHeader": "",
+          "forwardFingerprintHeader": "",
+          "forwardNotAfterHeader": ""
         }
 ```
 
@@ -253,7 +263,9 @@ spec:
             }
           },
           "stripHeaders": true,
-          "forwardIdentityHeader": ""
+          "forwardIdentityHeader": "",
+          "forwardFingerprintHeader": "",
+          "forwardNotAfterHeader": ""
         }
 ```
 
@@ -319,7 +331,7 @@ Unit (stdlib, `go test -race`): one table case per deny code; forged identity he
 `PeerCertificates` set with empty `VerifiedChains`; leaf/peer mismatch; wrong anchor; expired and not-yet-valid
 **leaf, intermediate and anchor** with skew edges; blocked; disabled; not enrolled; zero and two URI SANs; URI
 plus DNS SAN; prefix mismatch; constraint method and path, including `/insert/journald/upload/` and
-`/insert/journald/upload/extra`; header stripping and optional forward header; `New` rejects an unknown key
+`/insert/journald/upload/extra`; header stripping and the optional forward headers (identity, leaf fingerprint, leaf NotAfter); `New` rejects an unknown key
 beside `policy`, a list-valued or string-valued or null `policy`, unknown nested keys, weak types
 (`schemaVersion: "1"`), duplicates, empty issuers, an `identityPrefix` without trailing colon, bad paths; the
 next handler still sees `http.Hijacker` and `http.Flusher` on the ResponseWriter; concurrent requests against
@@ -355,6 +367,8 @@ Authorization on `app-a.test`:
 - two URI SANs -> 403; URI plus DNS or registeredID SAN -> 403 `identity_ambiguous`;
 - URI plus unknown GeneralName tag 9 -> 403 `identity_invalid`;
 - raw uppercase `URN:` -> 403 `identity_invalid`;
+- `app-leaf.test` (all three forward headers) delivers the identity, the leaf fingerprint and the leaf NotAfter, and
+  replaces spoofed client values;
 - blocked fingerprint -> 403; disabled identity -> 403; expired leaf -> handshake failure;
 - CA expiry on an established connection: handshake while the CA is valid, advance the fixture clock (or use
   a CA whose `NotAfter` is seconds away), second request on the same keep-alive connection -> 403 `cert_time`;
@@ -426,7 +440,7 @@ after fixing. Operators pin `version` and `hash` (R11). Record the archive hash 
 | D1 | Plugin catalog delivery | Section 10; `testData` must be a full policy |
 | D2 | Strict configuration: raw-map `CreateConfig`, outer and nested unknown keys rejected, policy type checked; `policyJSON` preserves types across file-provider coercion | Section 5, R13 |
 | D5 | Session tickets stay disabled on the TLSOption | R7/R8 are the only connection-state cases; per-request chain-wide checks still required |
-| D9 | No identity header forwarded by default | `forwardIdentityHeader: ""` |
+| D9 | No identity, fingerprint or NotAfter header forwarded by default | `forwardIdentityHeader: ""`, `forwardFingerprintHeader: ""`, `forwardNotAfterHeader: ""` |
 
 ## 12. Review log
 

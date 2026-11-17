@@ -94,7 +94,9 @@ http:
               "blockedFingerprints": [],
               "constraints": {},
               "stripHeaders": true,
-              "forwardIdentityHeader": ""
+              "forwardIdentityHeader": "",
+              "forwardFingerprintHeader": "",
+              "forwardNotAfterHeader": ""
             }
 ```
 
@@ -115,12 +117,18 @@ These fields belong inside the JSON object supplied as `policyJSON`.
 | `constraints` | object | `{}` | Per-enrolled-identity `methods` and `paths` lists; both must be non-empty. |
 | `stripHeaders` | boolean | `true` | Mandatory identity-header stripping; `false` is rejected. |
 | `forwardIdentityHeader` | string | `""` | Optional verified identity header in the `X-Mtls-*` namespace, for example `X-Mtls-Identity`. |
+| `forwardFingerprintHeader` | string | `""` | Optional header in the `X-Mtls-*` namespace carrying the leaf fingerprint: lowercase hex SHA-256 of the leaf DER, the value matched by `blockedFingerprints`. |
+| `forwardNotAfterHeader` | string | `""` | Optional header in the `X-Mtls-*` namespace carrying the leaf `NotAfter` in RFC 3339, UTC, for example `2027-01-31T12:00:00Z`. |
 
 Header stripping is mandatory. Successful requests lose `X-Forwarded-Tls-Client-Cert`,
 `X-Forwarded-Tls-Client-Cert-Info` and all `X-Mtls-*` headers. To pass the verified
 identity to a backend, configure `forwardIdentityHeader: "X-Mtls-Identity"` inside
 the policy. It is off by default. The header must be in the dedicated `X-Mtls-*`
-namespace with a non-empty suffix; its value replaces any inbound value. Denials return HTTP 403,
+namespace with a non-empty suffix; its value replaces any inbound value.
+`forwardFingerprintHeader` and `forwardNotAfterHeader` follow the same rules
+(for example `X-Mtls-Fingerprint` and `X-Mtls-Not-After`), and each is off by default.
+The three header names must be distinct (compared case-insensitively); a policy that
+reuses a name is rejected. Denials return HTTP 403,
 `forbidden`, `Cache-Control: no-store` and `X-Mtls-Authz-Reason`.
 Stripping applies to the initial HTTP headers. The plugin does not inspect or filter
 trailers, which are populated as the body is consumed; backends must use the
