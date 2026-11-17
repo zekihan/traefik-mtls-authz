@@ -28,6 +28,8 @@ POLICY_KEYS = {
     "constraints",
     "stripHeaders",
     "forwardIdentityHeader",
+    "forwardFingerprintHeader",
+    "forwardNotAfterHeader",
 }
 FENCE = re.compile(r"^```yaml[^\n]*\n(.*?)^```", re.MULTILINE | re.DOTALL)
 
@@ -99,9 +101,15 @@ def check_policy(block, where):
                 errors.append(f"{where}: constraint key {identity!r} is outside the identityPrefix")
             if not isinstance(rule, dict) or not rule.get("methods") or not rule.get("paths"):
                 errors.append(f"{where}: constraint {identity!r} needs non-empty methods and paths")
-    forward = policy.get("forwardIdentityHeader", "")
-    if not isinstance(forward, str) or (forward and not FORWARD_HEADER.fullmatch(forward)):
-        errors.append(f"{where}: forwardIdentityHeader must be empty or a valid X-Mtls-* token")
+    forwards = []
+    for key in ("forwardIdentityHeader", "forwardFingerprintHeader", "forwardNotAfterHeader"):
+        forward = policy.get(key, "")
+        if not isinstance(forward, str) or (forward and not FORWARD_HEADER.fullmatch(forward)):
+            errors.append(f"{where}: {key} must be empty or a valid X-Mtls-* token")
+        elif forward:
+            if forward.lower() in forwards:
+                errors.append(f"{where}: {key} duplicates another forward header")
+            forwards.append(forward.lower())
     if policy.get("stripHeaders", True) is not True:
         errors.append(f"{where}: stripHeaders must be true or omitted")
     if not isinstance(policy.get("app"), str) or not policy["app"].strip():

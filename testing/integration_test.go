@@ -205,7 +205,12 @@ func fixtureWithLogConfig(t *testing.T, catchall, strict, tickets bool, logConfi
 	t.Cleanup(backend.Close)
 	policyA := f.policy("app-a", []string{alice})
 	policyA["forwardIdentityHeader"] = "X-Mtls-Identity"
+	policyLeaf := f.policy("app-leaf", []string{alice})
+	policyLeaf["forwardIdentityHeader"] = "X-Mtls-Mesh-Viewer"
+	policyLeaf["forwardFingerprintHeader"] = "X-Mtls-Mesh-Fingerprint"
+	policyLeaf["forwardNotAfterHeader"] = "X-Mtls-Mesh-Not-After"
 	middlewares := object{
+		"leaf":        object{"plugin": object{"traefik-mtls-authz": object{"policy": policyLeaf}}},
 		"a":           object{"plugin": object{"traefik-mtls-authz": object{"policy": policyA}}},
 		"a2":          object{"plugin": object{"traefik-mtls-authz": object{"policy": f.policy("app-a2", []string{bob})}}},
 		"b":           object{"plugin": object{"traefik-mtls-authz": object{"policy": f.policy("app-b", []string{bob})}}},
@@ -227,6 +232,7 @@ func fixtureWithLogConfig(t *testing.T, catchall, strict, tickets bool, logConfi
 		routers[name] = r
 	}
 	add("app-a", "app-a.test", "mtls-a", "a", 100)
+	add("app-leaf", "app-leaf.test", "mtls-a", "leaf", 100)
 	add("app-a2", "app-a2.test", "mtls-a", "a2", 100)
 	add("app-b", "app-b.test", "mtls-b", "b", 100)
 	add("plain", "plain.test", "default", "", 100)
@@ -362,7 +368,7 @@ func (f *fixture) request(sni, host, client string, version uint16, method, path
 		return nil, nil, err
 	}
 	defer conn.Close()
-	return exchange(conn, host, method, path, http.Header{"X-Mtls-Forged": []string{"spoof"}, "X-Mtls-Identity": []string{bob}, "X-Forwarded-Tls-Client-Cert": []string{"spoof"}, "X-Forwarded-Tls-Client-Cert-Info": []string{"spoof"}})
+	return exchange(conn, host, method, path, http.Header{"X-Mtls-Forged": []string{"spoof"}, "X-Mtls-Identity": []string{bob}, "X-Mtls-Mesh-Viewer": []string{bob}, "X-Mtls-Mesh-Fingerprint": []string{"spoof"}, "x-mtls-mesh-not-after": []string{"spoof"}, "X-Forwarded-Tls-Client-Cert": []string{"spoof"}, "X-Forwarded-Tls-Client-Cert-Info": []string{"spoof"}})
 }
 func (f *fixture) expect(sni, host, client string, version uint16, method, path string, status int, reason string) {
 	f.t.Helper()
@@ -760,6 +766,40 @@ func (f *fixture) testSessions(enabled bool) {
 					f.t.Fatalf("TLS=%x enabled=%v ticket=%v", version, enabled, ticket)
 				}
 			}
+		}
+	}
+}
+
+func TestForwardLeafHeaders(t *testing.T) {
+	f := newFixture(t, false, true, true)
+	res, body, err := f.request("app-leaf.test", "app-leaf.test", "alice", tls.VersionTLS13, "GET", "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 200 {
+		t.Fatalf("status=%d reason=%q body=%q", res.StatusCode, res.Header.Get("X-Mtls-Authz-Reason"), body)
+	}
+	var headers http.Header
+	if err := json.Unmarshal(body, &headers); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"X-Mtls-Mesh-Viewer":      alice,
+		"X-Mtls-Mesh-Fingerprint": fp(f.clients["alice"]),
+		"X-Mtls-Mesh-Not-After":   f.clients["alice"].parsed.NotAfter.UTC().Format(time.RFC3339),
+	}
+	for name, value := range want {
+		if got := headers.Values(name); len(got) != 1 || got[0] != value {
+			t.Fatalf("%s=%q, want %q (all headers %v)", name, got, value, headers)
+		}
+	}
+	for key := range headers {
+		lower := strings.ToLower(key)
+		if _, ok := want[http.CanonicalHeaderKey(key)]; ok {
+			continue
+		}
+		if strings.HasPrefix(lower, "x-mtls-") || strings.HasPrefix(lower, "x-forwarded-tls-client-cert") {
+			t.Fatal("forged header survived", key, headers)
 		}
 	}
 }

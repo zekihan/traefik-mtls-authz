@@ -19,5 +19,7 @@ testData:
       "blockedFingerprints": [],
       "constraints": {},
       "stripHeaders": true,
-      "forwardIdentityHeader": ""
+      "forwardIdentityHeader": "",
+      "forwardFingerprintHeader": "",
+      "forwardNotAfterHeader": ""
     }
