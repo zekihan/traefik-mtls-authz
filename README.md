@@ -3,7 +3,7 @@
 A Traefik middleware plugin for per-application client certificate authorization.
 
 [![Traefik Plugin](https://img.shields.io/badge/Traefik%20Plugin-Traefik%20mTLS%20Authorization-blue)](https://plugins.traefik.io/plugins/6ae44f4d45a3588988cfca95/traefik-m-tls-authorization)
-[![Version](https://img.shields.io/badge/version-0.1.1-green)](https://github.com/zekihan/traefik-mtls-authz/releases/tag/v0.1.1)
+[![Version](https://img.shields.io/badge/version-0.2.0-green)](https://github.com/zekihan/traefik-mtls-authz/releases/tag/v0.2.0)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/zekihan/traefik-mtls-authz/blob/main/LICENSE)
 [![Checks](https://github.com/zekihan/traefik-mtls-authz/actions/workflows/pr.yaml/badge.svg)](https://github.com/zekihan/traefik-mtls-authz/actions/workflows/pr.yaml)
 
@@ -29,7 +29,7 @@ argocd repository. No production routes have been changed by this implementation
 
 Find the plugin in the
 [Traefik Plugin Catalog](https://plugins.traefik.io/plugins/6ae44f4d45a3588988cfca95/traefik-m-tls-authorization).
-The current release is [v0.1.1](https://github.com/zekihan/traefik-mtls-authz/releases/tag/v0.1.1).
+The current release is [v0.2.0](https://github.com/zekihan/traefik-mtls-authz/releases/tag/v0.2.0).
 
 ### Static Configuration
 
@@ -44,11 +44,11 @@ experimental:
   plugins:
     traefik-mtls-authz:
       moduleName: github.com/zekihan/traefik-mtls-authz
-      version: v0.1.1
-      hash: "2cc96729ae89164d5c6a73ad79601bf04efcedc0448cd93e0eb8f81465d90c23"
+      version: v0.2.0
+      hash: "52c3cd8b71b59a97bd39134a6b05b2ead2ee02b76fb015db1632c6b0f7e809de"
 ```
 
-The hash pins the v0.1.1 archive downloaded from the Plugin Catalog. Update the
+The hash pins the v0.2.0 archive downloaded from the Plugin Catalog. Update the
 version and hash together when upgrading; it is not the hash of GitHub's source zip.
 Then create the middleware described below and place it first on every matching
 application router. The route must use `RequireAndVerifyClientCert`; see the
@@ -183,7 +183,7 @@ The release workflow requires unit, documentation and real-Traefik checks before
 publishing a source release. The public repository needs the `traefik-plugin`
 topic for catalog discovery. After catalog indexing, download the exact catalog
 archive and append its SHA-256 to the release notes with
-`scripts/catalog_hash.sh v0.1.1`. Operators pin that hash with the version.
+`scripts/catalog_hash.sh v0.2.0`. Operators pin that hash with the version.
 Never substitute the hash of GitHub's source zip for the catalog archive hash.
 
 ## License

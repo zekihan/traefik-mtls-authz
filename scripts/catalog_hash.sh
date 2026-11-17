@@ -2,7 +2,7 @@
 # Print a release-note snippet for the exact archive Traefik's catalog serves.
 # Run after tagging and catalog indexing. This script does not publish or edit a release.
 set -euo pipefail
-version=${1:?usage: scripts/catalog_hash.sh v0.1.1}
+version=${1:?usage: scripts/catalog_hash.sh v0.2.0}
 if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo 'expected a vMAJOR.MINOR.PATCH tag' >&2
   exit 1
