@@ -826,6 +826,45 @@ func TestForwardLeafHeaders(t *testing.T) {
 	}
 }
 
+func TestTrustedIssuerRotation(t *testing.T) {
+	f := newFixture(t, false, true, false)
+	rootV2 := issue(t, nil, "test-root-v2", true, nil, nil, f.root.parsed.NotAfter)
+	intermediateV2, err := x509.CreateCertificate(rand.Reader, f.intermediate.parsed, rootV2.parsed, &f.intermediate.key.PublicKey, rootV2.key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The same leaf can chain through either signing of the intermediate.
+	v2Only := *f.clients["alice"]
+	v2Only.pair.Certificate = [][]byte{v2Only.der, intermediateV2}
+	f.clients["alice-v2"] = &v2Only
+	overlap := v2Only
+	overlap.pair.Certificate = [][]byte{overlap.der, f.intermediate.der, intermediateV2}
+	f.clients["alice-overlap"] = &overlap
+
+	writePEM(t, filepath.Join(f.dir, "root-v2.pem"), "CERTIFICATE", rootV2.der)
+	tlsOptions := f.config["tls"].(object)["options"].(object)
+	tlsOptions["mtls-a"].(object)["clientAuth"].(object)["caFiles"] = []string{"/fixture/root.pem", "/fixture/root-v2.pem"}
+	policy := f.plugin("a")["policy"].(object)
+	policy["trustedIssuers"] = []string{fp(f.root), fp(rootV2)}
+	f.save()
+	host := "app-a.test"
+	f.await(func() bool {
+		res, _, err := f.request(host, host, "alice-v2", tls.VersionTLS13, "GET", "/")
+		return err == nil && res.StatusCode == http.StatusOK
+	})
+	f.expect(host, host, "alice-overlap", tls.VersionTLS13, "GET", "/", http.StatusOK, "")
+
+	// Remove the v1 pin while the TLS CA bundle still overlaps.
+	policy["trustedIssuers"] = []string{fp(rootV2)}
+	f.save()
+	f.await(func() bool {
+		res, _, err := f.request(host, host, "alice", tls.VersionTLS13, "GET", "/")
+		return err == nil && res.StatusCode == http.StatusForbidden && res.Header.Get("X-Mtls-Authz-Reason") == "issuer_not_trusted"
+	})
+	f.expect(host, host, "alice-v2", tls.VersionTLS13, "GET", "/", http.StatusOK, "")
+	f.expect(host, host, "alice-overlap", tls.VersionTLS13, "GET", "/", http.StatusOK, "")
+}
+
 func TestTicketsEnabled(t *testing.T) { f := newFixture(t, false, true, true); f.testSessions(true) }
 func TestNonStrictConflict(t *testing.T) {
 	f := newFixture(t, false, false, false)
