@@ -163,6 +163,44 @@ func TestChainValiditySkew(t *testing.T) {
 	}
 }
 
+func TestTrustedIssuerRotation(t *testing.T) {
+	v1 := fingerprint([]byte("root"))
+	v2 := fingerprint([]byte("root-v2"))
+	for _, tc := range []struct {
+		name       string
+		pins       []string
+		v1Expiry   time.Duration
+		disabled   bool
+		wantReason string
+		wantAnchor string
+	}{
+		{"overlap", []string{v1, v2}, time.Hour, false, "allowed", v1},
+		{"first-anchor-expired", []string{v1, v2}, -61 * time.Second, false, "allowed", v2},
+		{"first-anchor-withdrawn", []string{v2}, time.Hour, false, "allowed", v2},
+		{"only-expired-chain-pinned", []string{v1}, -61 * time.Second, false, "cert_time", v1},
+		{"disabled-after-rotation", []string{v2}, time.Hour, true, "identity_disabled", v2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := validRequest()
+			v1Chain := r.TLS.VerifiedChains[0]
+			v2Root := *v1Chain[2]
+			v2Root.Raw = []byte("root-v2")
+			v1Chain[2].NotAfter = testNow.Add(tc.v1Expiry)
+			r.TLS.VerifiedChains = append(r.TLS.VerifiedChains, []*x509.Certificate{v1Chain[0], v1Chain[1], &v2Root})
+			cfg := validConfig()
+			p := (*cfg)["policy"].(map[string]interface{})
+			p["trustedIssuers"] = tc.pins
+			if tc.disabled {
+				p["disabledIdentities"] = []string{testIdentity}
+			}
+			d := newTestMiddleware(t, cfg, nil).authorize(r)
+			if d.reason != tc.wantReason || d.anchorFp != tc.wantAnchor {
+				t.Fatalf("reason=%q anchor=%q, want %q and %q", d.reason, d.anchorFp, tc.wantReason, tc.wantAnchor)
+			}
+		})
+	}
+}
+
 func TestExactConstraintPath(t *testing.T) {
 	for _, path := range []string{"/insert/journald/upload", "/insert/journald/upload/", "/insert/journald/upload/extra", "/INSERT/journald/upload"} {
 		t.Run(path, func(t *testing.T) {

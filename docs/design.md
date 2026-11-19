@@ -51,13 +51,13 @@ Per request. No body access. The handler never wraps the ResponseWriter, so `htt
 1. `req.TLS == nil` -> deny `no_tls`.
 2. `len(req.TLS.VerifiedChains) == 0` -> deny `unverified`. Covers weaker client-auth modes, the default-option
    fallback (R5) and any proxy that terminates the client's TLS in front of Traefik.
-3. `chain := VerifiedChains[0]`; `leaf := chain[0]`; require `bytes.Equal(leaf.Raw, PeerCertificates[0].Raw)`
-   -> else `unverified`.
-4. `anchor := chain[len(chain)-1]`; `hex(sha256(anchor.Raw))` must be in `trustedIssuers` -> else
-   `issuer_not_trusted`. Defense in depth against a wrong TLSOption or CA bundle on the route.
-5. For **every** certificate in `chain` (leaf, intermediates, anchor): `NotBefore-60s <= now <= NotAfter+60s`
-   -> else `cert_time`. Needed because of R8; an intermediate or root can expire while the leaf is still valid
-   on an established connection.
+3. Require each verified chain to be non-empty, contain certificates with DER bytes, and start with a
+   leaf whose DER matches `PeerCertificates[0].Raw`. Missing or inconsistent evidence denies `unverified`.
+4. Find verified chains whose final certificate's SHA-256 DER fingerprint is in `trustedIssuers`.
+   If no anchor matches, deny `issuer_not_trusted`.
+5. Use the first pinned chain for which **every** certificate satisfies
+   `NotBefore-60s <= now <= NotAfter+60s`. If no pinned chain passes, deny `cert_time`. This rechecks
+   expiry on established connections and lets a cross-signed client use a valid pinned chain during CA rotation.
 6. `hex(sha256(leaf.Raw))` in `blockedFingerprints` -> deny `fingerprint_blocked`.
 7. Identity: exactly one entry in `leaf.URIs` and none in `DNSNames`, `EmailAddresses`, `IPAddresses`.
    The raw SAN sequence must contain exactly one primitive context-specific URI
@@ -325,8 +325,8 @@ counted in `traefik_router_requests_total`. That is the metrics path.
   backends must obtain identity from the verified initial header, not trailer fields.
 - Withdrawal does not terminate established WebSockets or in-flight uploads; the operator must close the
   connection (Traefik restart or backend stop).
-- A certificate, or a CA in its chain, that expires mid-connection is denied on its next request (step 5),
-  not mid-stream.
+- Certificate validity is rechecked on the next request (step 5). An established connection can
+  continue authorizing requests while it has a current verified chain to a pinned anchor.
 - A failed `New` only yields a 404 when no other router matches (section 7, route coverage).
 - The reason header leaks the deny category to a holder of a CA-valid certificate. Accepted for operability.
 

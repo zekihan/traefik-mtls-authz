@@ -122,11 +122,9 @@ the other way round, apart from the documented native-transport exceptions in I1
   `EscapedPath`. RFC 3986 does not allow them in a path. This is harmless because matching
   is exact and every accepted path is reachable by its literal request. The reference
   path validator was aligned to accept them.
-- I3 (open question): only `VerifiedChains[0]` is considered. With cross-signed CAs, a
-  request whose first verified chain ends at an unpinned root is denied even when a later
-  chain ends at a pinned one. This fails closed, so it is an availability issue and not
-  a bypass. Pin every root the client chains can reach, or decide whether `authorize`
-  should scan all verified chains.
+- I3 (fixed after the fuzzing run). With cross-signed CAs, checking only the first verified
+  chain denied clients that still had a valid chain to a pinned root. `TestTrustedIssuerRotation`
+  covers the switch from both roots pinned to only the new root pinned in real Traefik.
 - I4 (Low, log amplification): deny logs include Host, method, SNI and path without a
   length cap. The identity field only logs validated identities of at most 128 bytes,
   as docs/design.md section 6 specifies. `%q` expands each non-printable byte to at most 4 bytes, so a single request
@@ -137,7 +135,6 @@ the other way round, apart from the documented native-transport exceptions in I1
 
 ## Open questions
 
-- I3: should `authorize` accept any verified chain that ends at a pinned anchor?
 - I4: should request fields in deny logs be capped like the identity?
 
 ## How to rerun

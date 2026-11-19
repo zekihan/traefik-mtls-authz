@@ -65,6 +65,8 @@ rejected even though Go's URL parser normalizes it. `identityPrefix` must name a
 full profile such as `urn:noqer:mtls:clients:`; broader prefixes are rejected.
 The issuer fingerprint is the SHA-256 of the verified chain's root certificate
 DER, not of its PEM file or its intermediate.
+During CA rotation, a client can have several verified chains. The plugin requires
+one current chain that ends at a root listed in `trustedIssuers`.
 
 Use `policyJSON` with every Traefik provider, including Kubernetes, to preserve strict types. In
 particular, Traefik's **file provider stringifies scalar map values** before the

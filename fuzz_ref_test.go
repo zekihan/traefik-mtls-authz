@@ -363,31 +363,53 @@ func refTimeValid(now, notBefore, notAfter time.Time) bool {
 	return n.Cmp(lo) >= 0 && n.Cmp(hi) <= 0
 }
 
+func refVerifiedChain(chain []*x509.Certificate, peer *x509.Certificate) bool {
+	if len(chain) == 0 || chain[0] == nil || string(chain[0].Raw) != string(peer.Raw) {
+		return false
+	}
+	for _, cert := range chain {
+		if cert == nil || len(cert.Raw) == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func refCurrentChain(chain []*x509.Certificate, now time.Time) bool {
+	for _, cert := range chain {
+		if !refTimeValid(now, cert.NotBefore, cert.NotAfter) {
+			return false
+		}
+	}
+	return true
+}
+
 func refDecide(rp refPolicy, req *http.Request, now time.Time) string {
 	st := req.TLS
 	if st == nil {
 		return "no_tls"
 	}
-	if len(st.VerifiedChains) == 0 || len(st.VerifiedChains[0]) == 0 || len(st.PeerCertificates) == 0 || st.PeerCertificates[0] == nil {
+	if len(st.VerifiedChains) == 0 || len(st.PeerCertificates) == 0 || st.PeerCertificates[0] == nil {
 		return "unverified"
 	}
-	chain := st.VerifiedChains[0]
-	for _, c := range chain {
-		if c == nil || len(c.Raw) == 0 {
+	var leaf *x509.Certificate
+	pinned := false
+	for _, chain := range st.VerifiedChains {
+		if !refVerifiedChain(chain, st.PeerCertificates[0]) {
 			return "unverified"
 		}
+		if rp.trusted[refFingerprint(chain[len(chain)-1].Raw)] {
+			pinned = true
+			if leaf == nil && refCurrentChain(chain, now) {
+				leaf = chain[0]
+			}
+		}
 	}
-	leaf := chain[0]
-	if string(leaf.Raw) != string(st.PeerCertificates[0].Raw) {
-		return "unverified"
-	}
-	if !rp.trusted[refFingerprint(chain[len(chain)-1].Raw)] {
+	if !pinned {
 		return "issuer_not_trusted"
 	}
-	for _, c := range chain {
-		if !refTimeValid(now, c.NotBefore, c.NotAfter) {
-			return "cert_time"
-		}
+	if leaf == nil {
+		return "cert_time"
 	}
 	if rp.blocked[refFingerprint(leaf.Raw)] {
 		return "fingerprint_blocked"
@@ -446,21 +468,24 @@ func checkAllowInvariant(t *testing.T, rp refPolicy, req *http.Request, now time
 	}
 	fail := func(why string) { t.Fatalf("authorization bypass: allowed but %s (identity=%q)", why, d.identity) }
 	st := req.TLS
-	if st == nil || len(st.VerifiedChains) == 0 || len(st.VerifiedChains[0]) == 0 || len(st.PeerCertificates) == 0 {
+	if st == nil || len(st.PeerCertificates) == 0 || st.PeerCertificates[0] == nil {
 		fail("no verified chain")
 	}
-	chain := st.VerifiedChains[0]
-	leaf := chain[0]
-	if st.PeerCertificates[0] == nil || string(leaf.Raw) != string(st.PeerCertificates[0].Raw) {
-		fail("leaf is not the peer certificate")
-	}
-	if !rp.trusted[refFingerprint(chain[len(chain)-1].Raw)] {
-		fail("anchor not pinned")
-	}
-	for _, c := range chain {
-		if c == nil || len(c.Raw) == 0 || !refTimeValid(now, c.NotBefore, c.NotAfter) {
-			fail("chain certificate missing or outside validity")
+	var leaf *x509.Certificate
+	for _, chain := range st.VerifiedChains {
+		if !refVerifiedChain(chain, st.PeerCertificates[0]) {
+			fail("malformed verified chain")
 		}
+		anchor := refFingerprint(chain[len(chain)-1].Raw)
+		if leaf == nil && anchor == d.anchorFp && rp.trusted[anchor] && refCurrentChain(chain, now) {
+			leaf = chain[0]
+		}
+	}
+	if leaf == nil {
+		fail("no current verified chain with the claimed pinned anchor")
+	}
+	if d.leafFp != refFingerprint(leaf.Raw) {
+		fail("leaf fingerprint disagrees with the verified chain")
 	}
 	if rp.blocked[refFingerprint(leaf.Raw)] {
 		fail("leaf fingerprint blocked")

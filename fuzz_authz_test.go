@@ -125,8 +125,11 @@ func FuzzAuthorizeSynthetic(f *testing.F) {
 
 		// Policy shaped from the same stream.
 		trusted := []string{refFingerprint(fuzzRootRaw)}
-		if b.flag() {
+		switch b.intn(3) {
+		case 1:
 			trusted = []string{refFingerprint([]byte("other"))}
+		case 2:
+			trusted = append(trusted, refFingerprint([]byte("other")))
 		}
 		candidates := []string{testIdentity, fuzzBob, fuzzCarol, sanText, uriText}
 		identities, disabled := []string{}, []string{}
@@ -167,6 +170,18 @@ func FuzzAuthorizeSynthetic(f *testing.F) {
 		req := &http.Request{Method: method, Header: http.Header{}, TLS: state}
 		if b.intn(4) != 0 {
 			req.URL, _ = url.Parse(target)
+		}
+		if len(state.VerifiedChains) != 0 {
+			switch b.intn(4) {
+			case 1, 2:
+				anchor := fuzzCert(raws[2+b.intn(2)])
+				if b.flag() {
+					anchor.NotBefore, anchor.NotAfter = fuzzTime(b), fuzzTime(b)
+				}
+				state.VerifiedChains = append(state.VerifiedChains, []*x509.Certificate{leaf, anchor})
+			case 3:
+				state.VerifiedChains = append(state.VerifiedChains, nil)
+			}
 		}
 		d := m.authorize(req)
 		rp := refPolicyFromParsed(m.policy)

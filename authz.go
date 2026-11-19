@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/hex"
 	"fmt"
 	"log"
@@ -82,35 +83,52 @@ func (m *Middleware) authorize(req *http.Request) decision {
 		return d
 	}
 	d.reason = "unverified"
-	if len(req.TLS.VerifiedChains) == 0 || len(req.TLS.VerifiedChains[0]) == 0 ||
+	chains := req.TLS.VerifiedChains
+	if len(chains) == 0 ||
 		len(req.TLS.PeerCertificates) == 0 || req.TLS.PeerCertificates[0] == nil {
 		return d
 	}
-	chain := req.TLS.VerifiedChains[0]
+	peer := req.TLS.PeerCertificates[0]
 	// Synthetic or corrupted TLS state must also fail closed.
-	for _, cert := range chain {
-		if cert == nil || len(cert.Raw) == 0 {
+	for _, chain := range chains {
+		if len(chain) == 0 {
+			return d
+		}
+		for _, cert := range chain {
+			if cert == nil || len(cert.Raw) == 0 {
+				return d
+			}
+		}
+		if !bytes.Equal(chain[0].Raw, peer.Raw) {
 			return d
 		}
 	}
-	leaf := chain[0]
-	if !bytes.Equal(leaf.Raw, req.TLS.PeerCertificates[0].Raw) {
-		return d
-	}
-	d.leafFp = fingerprint(leaf.Raw)
-	d.leafNotAfter = leaf.NotAfter.UTC().Format(time.RFC3339)
-	d.anchorFp = fingerprint(chain[len(chain)-1].Raw)
+	d.leafFp = fingerprint(peer.Raw)
 	d.reason = "issuer_not_trusted"
-	if !m.issuers[d.anchorFp] {
-		return d
-	}
-	d.reason = "cert_time"
+	var leaf *x509.Certificate
 	now := m.now()
-	for _, cert := range chain {
-		if now.Before(cert.NotBefore.Add(-60*time.Second)) || now.After(cert.NotAfter.Add(60*time.Second)) {
-			return d
+	for i, chain := range chains {
+		anchorFp := fingerprint(chain[len(chain)-1].Raw)
+		if i == 0 {
+			d.anchorFp = anchorFp
+		}
+		if !m.issuers[anchorFp] {
+			continue
+		}
+		if d.reason == "issuer_not_trusted" {
+			d.reason = "cert_time"
+			d.anchorFp = anchorFp
+		}
+		if chainValidAt(chain, now) {
+			leaf = chain[0]
+			d.anchorFp = anchorFp
+			break
 		}
 	}
+	if leaf == nil {
+		return d
+	}
+	d.leafNotAfter = leaf.NotAfter.UTC().Format(time.RFC3339)
 	d.reason = "fingerprint_blocked"
 	if m.blocked[d.leafFp] {
 		return d
@@ -156,6 +174,15 @@ func (m *Middleware) authorize(req *http.Request) decision {
 	}
 	d.reason = "allowed"
 	return d
+}
+
+func chainValidAt(chain []*x509.Certificate, now time.Time) bool {
+	for _, cert := range chain {
+		if now.Before(cert.NotBefore.Add(-60*time.Second)) || now.After(cert.NotAfter.Add(60*time.Second)) {
+			return false
+		}
+	}
+	return true
 }
 
 func contains(values []string, value string) bool {
