@@ -389,6 +389,9 @@ func TestLogs(t *testing.T) {
 	if strings.Count(log, "\n") != 2 || !strings.Contains(log, "event=deny reason=not_enrolled") || !strings.Contains(log, "leafFp=\""+fingerprint([]byte("leaf"))[:16]+"\"") || strings.Contains(log, "secret=") || strings.Contains(log, fingerprint([]byte("leaf"))) {
 		t.Fatal(log)
 	}
+	if !strings.Contains(log, ` identity="`+testIdentity+`" `) {
+		t.Fatal("valid unenrolled identity missing from log")
+	}
 }
 
 func TestPolicyJSON(t *testing.T) {
@@ -578,24 +581,36 @@ func TestConstraintKeyMustBeEnrolled(t *testing.T) {
 	}
 }
 
-func TestIdentityLogIsBounded(t *testing.T) {
+func TestInvalidIdentityIsOmittedFromLogs(t *testing.T) {
 	saved := decisionLogger.Writer()
 	var buffer strings.Builder
 	decisionLogger.SetOutput(&buffer)
 	defer decisionLogger.SetOutput(saved)
 	m := newTestMiddleware(t, validConfig(), nil)
-	identity := "urn:noqer:mtls:clients:" + strings.Repeat("a", 20*1024)
-	req := validRequest()
-	leaf := req.TLS.PeerCertificates[0]
-	leaf.URIs[0], _ = url.Parse(identity)
-	leaf.Extensions = []pkix.Extension{testSAN(identity)}
-	w := httptest.NewRecorder()
-	m.ServeHTTP(w, req)
-	if w.Code != 403 || w.Header().Get("X-Mtls-Authz-Reason") != "identity_invalid" {
-		t.Fatal("overlong identity accepted")
-	}
-	if buffer.Len() > 2048 || !strings.Contains(buffer.String(), `identity="`+identity[:128]+`[truncated]"`) {
-		t.Fatal("identity log was not bounded", buffer.Len())
+	for _, tc := range []struct{ name, uri string }{
+		{"query", testIdentity + "?token=synthetic-san-token"},
+		{"userinfo", "https://alice:synthetic-san-password@example.test/"},
+		{"overlong", "urn:noqer:mtls:clients:" + strings.Repeat("a", 20*1024)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			buffer.Reset()
+			req := validRequest()
+			leaf := req.TLS.PeerCertificates[0]
+			uri, err := url.Parse(tc.uri)
+			if err != nil {
+				t.Fatal(err)
+			}
+			leaf.URIs[0] = uri
+			leaf.Extensions = []pkix.Extension{testSAN(tc.uri)}
+			w := httptest.NewRecorder()
+			m.ServeHTTP(w, req)
+			if w.Code != http.StatusForbidden || w.Header().Get("X-Mtls-Authz-Reason") != "identity_invalid" {
+				t.Fatalf("status=%d headers=%v", w.Code, w.Header())
+			}
+			if !strings.Contains(buffer.String(), ` identity="" `) {
+				t.Fatal("invalid certificate URI was written to the decision log")
+			}
+		})
 	}
 }
 

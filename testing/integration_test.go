@@ -1071,13 +1071,16 @@ func TestCatalogConfiguration(t *testing.T) {
 
 func TestJSONFileLogging(t *testing.T) {
 	f := fixtureWithLogConfig(t, false, true, false, object{"level": "INFO", "format": "json", "filePath": "/logs/traefik.json"})
+	const sanMarker = "synthetic-san-token"
+	f.clients["uri-query"] = issue(t, f.intermediate, "uri-query", false, []string{alice + "?token=" + sanMarker}, nil, time.Now().Add(time.Hour))
 	f.expect("app-a.test", "app-a.test", "unenrolled", tls.VersionTLS13, "GET", "/", 403, "not_enrolled")
+	f.expect("app-a.test", "app-a.test", "uri-query", tls.VersionTLS13, "GET", "/", 403, "identity_invalid")
 	f.await(func() bool {
 		data, err := os.ReadFile(filepath.Join(f.dir, "logs", "traefik.json"))
 		if err != nil {
 			return false
 		}
-		load, invalid, deny := false, false, false
+		load, invalid, deny, denyInvalidIdentity := false, false, false, false
 		for _, line := range bytes.Split(bytes.TrimSpace(data), []byte("\n")) {
 			var entry object
 			if err := json.Unmarshal(line, &entry); err != nil {
@@ -1102,8 +1105,14 @@ func TestJSONFileLogging(t *testing.T) {
 			if strings.Contains(message, "event=deny reason=not_enrolled") {
 				deny = true
 			}
+			if strings.Contains(message, "event=deny reason=identity_invalid") {
+				if strings.Contains(message, sanMarker) || !strings.Contains(message, ` identity="" `) {
+					t.Fatal("invalid certificate URI was written to the Traefik log")
+				}
+				denyInvalidIdentity = true
+			}
 		}
-		return load && invalid && deny
+		return load && invalid && deny && denyInvalidIdentity
 	})
 	console, err := f.compose("logs", "--no-color")
 	if err != nil {

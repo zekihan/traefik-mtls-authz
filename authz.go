@@ -132,10 +132,10 @@ func (m *Middleware) authorize(req *http.Request) decision {
 		d.reason = reason
 		return d
 	}
-	d.identity = rawIdentity
-	if rawIdentity != leaf.URIs[0].String() || !validIdentity(d.identity, m.policy.IdentityPrefix) {
+	if rawIdentity != leaf.URIs[0].String() || !validIdentity(rawIdentity, m.policy.IdentityPrefix) {
 		return d
 	}
+	d.identity = rawIdentity
 	d.reason = "identity_disabled"
 	if m.disabled[d.identity] {
 		return d
@@ -222,16 +222,10 @@ func (m *Middleware) logDecision(event string, d decision, req *http.Request) {
 	if len(anchorFp) > 16 {
 		anchorFp = anchorFp[:16]
 	}
-	// Identity syntax validation can reject a large CA-issued URI. Bound its
-	// log representation independently so that certificate cannot flood logs.
-	identity := d.identity
-	if len(identity) > 128 {
-		identity = identity[:128] + "[truncated]"
-	}
 	// Quoting keeps attacker-controlled strings on one line. No query strings,
 	// certificate bodies, request bodies or headers are logged.
 	line := fmt.Sprintf("event=%s reason=%s app=%q policyRevision=%q router=%q identity=%q leafFp=%q anchorFp=%q tlsVersion=0x%04x sni=%q host=%q method=%q path=%q\n",
-		event, d.reason, m.policy.App, m.policy.PolicyRevision, m.name, identity, leafFp, anchorFp, version, sni, req.Host, req.Method, path)
+		event, d.reason, m.policy.App, m.policy.PolicyRevision, m.name, d.identity, leafFp, anchorFp, version, sni, req.Host, req.Method, path)
 	if event == "allow" {
 		// Yaegi routes fmt.Print through the interpreter's DEBUG-level stdout.
 		// Writing os.Stdout directly would bypass Traefik's log-level filtering.

@@ -46,12 +46,13 @@ The suite checks:
   upload delivery before EOF, and flushed responses before the stream ends.
 - Intermediate expiry on the next request over the **same** established connection.
 - Deny/load lines through Traefik's ERROR logger (including metadata and JSON/file
-  destinations), no raw-console copies with a file sink, and DEBUG-only allow lines.
+  destinations), omission of rejected URI SANs, no raw-console copies with a file
+  sink, and DEBUG-only allow lines.
 
 Unit tests supplement these with every certificate's validity/skew edges, issuer
 pin failures, defensive malformed TLS state, all policy rules, immutable policy
 snapshots, concurrent requests and ResponseWriter/body transparency. Typos in
-constraint identity keys are rejected; invalid identity log values are bounded.
+constraint identity keys are rejected, and invalid identities leave the log field empty.
 CI's `make tidy` and `make lint` also format/vet the integration-tagged Go file.
 
 The suite does not publish a release or deploy to Kubernetes. Actual deployment
