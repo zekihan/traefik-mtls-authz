@@ -160,7 +160,7 @@ func fixtureWithLogLevel(t *testing.T, catchall, strict, tickets bool, logLevel 
 	return fixtureWithLogConfig(t, catchall, strict, tickets, object{"level": logLevel, "noColor": true})
 }
 
-func fixtureWithLogConfig(t *testing.T, catchall, strict, tickets bool, logConfig object) *fixture {
+func fixtureWithLogConfig(t *testing.T, catchall, strict, tickets bool, logConfig object, connectionOptions ...string) *fixture {
 	t.Helper()
 	f := &fixture{t: t, dir: t.TempDir(), project: fmt.Sprintf("mtls-%d-%d", os.Getpid(), time.Now().UnixNano()), address: port(t), proxyAddress: port(t), clients: make(map[string]*certificate), catchall: catchall, streamStarted: make(chan struct{}), eventRelease: make(chan struct{})}
 	expiry := time.Now().Add(time.Hour)
@@ -251,10 +251,14 @@ func fixtureWithLogConfig(t *testing.T, catchall, strict, tickets bool, logConfi
 	}
 	f.config = object{"http": object{"routers": routers, "middlewares": middlewares, "services": object{"backend": object{"loadBalancer": object{"servers": []object{{"url": backend.URL}}}}}}, "tls": object{"certificates": []object{{"certFile": "/fixture/server.pem", "keyFile": "/fixture/server-key.pem"}}, "options": object{"default": object{}, "mtls-a": option(), "mtls-b": option()}}}
 	f.save()
+	web := object{"address": f.address}
+	if len(connectionOptions) > 0 {
+		web["forwardedHeaders"] = object{"connection": connectionOptions}
+	}
 	static := object{
 		"global": object{"checkNewVersion": false, "sendAnonymousUsage": false},
 		"core":   object{"strictTLSOptions": strict}, "log": logConfig,
-		"entryPoints":  object{"web": object{"address": f.address}, "proxy": object{"address": f.proxyAddress, "proxyProtocol": object{"trustedIPs": []string{"127.0.0.1/32"}}}},
+		"entryPoints":  object{"web": web, "proxy": object{"address": f.proxyAddress, "proxyProtocol": object{"trustedIPs": []string{"127.0.0.1/32"}}}},
 		"providers":    object{"providersThrottleDuration": "100ms", "file": object{"directory": "/fixture/dynamic", "watch": true}},
 		"experimental": object{"abortOnPluginFailure": true, "localPlugins": object{"traefik-mtls-authz": object{"moduleName": module}}},
 	}
@@ -828,6 +832,47 @@ func TestForwardLeafHeaders(t *testing.T) {
 		if strings.HasPrefix(lower, "x-mtls-") || strings.HasPrefix(lower, "x-forwarded-tls-client-cert") {
 			t.Fatal("forged header survived", key, headers)
 		}
+	}
+}
+
+func TestConnectionOptionsPreserveForwardedLeafHeaders(t *testing.T) {
+	const identityHeader = "X-Mtls-Mesh-Viewer"
+	const fingerprintHeader = "X-Mtls-Mesh-Fingerprint"
+	const notAfterHeader = "X-Mtls-Mesh-Not-After"
+	const hopHeader = "X-Test-Hop"
+	f := fixtureWithLogConfig(t, false, true, false, object{"level": "INFO", "noColor": true},
+		identityHeader, fingerprintHeader, notAfterHeader, hopHeader)
+	conn, err := f.dial("app-leaf.test", "alice", tls.VersionTLS13, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	headers := http.Header{
+		"Connection": {identityHeader + ", " + hopHeader, fingerprintHeader + ",\t" + strings.ToUpper(notAfterHeader)},
+		hopHeader:    {"hop-only"},
+	}
+	res, body, err := exchange(conn, "app-leaf.test", "GET", "/", headers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%q", res.StatusCode, body)
+	}
+	var received http.Header
+	if err := json.Unmarshal(body, &received); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{
+		identityHeader:    alice,
+		fingerprintHeader: fp(f.clients["alice"]),
+		notAfterHeader:    f.clients["alice"].parsed.NotAfter.UTC().Format(time.RFC3339),
+	} {
+		if got := received.Values(name); len(got) != 1 || got[0] != want {
+			t.Errorf("%s = %q, want one value %q", name, got, want)
+		}
+	}
+	if got := received.Values(hopHeader); len(got) != 0 {
+		t.Errorf("hop-by-hop header reached the backend: %q", got)
 	}
 }
 
