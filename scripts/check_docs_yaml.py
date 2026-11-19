@@ -15,7 +15,7 @@ import yaml
 PLUGIN_KEY = "traefik-mtls-authz"
 PREFIX = re.compile(r"^urn:noqer:mtls:[a-z0-9]+(?:-[a-z0-9]+)*:$")
 FORWARD_HEADER = re.compile(r"^X-Mtls-[!#$%&'*+\-.^_`|~0-9A-Za-z]+$", re.IGNORECASE)
-HEX64 = re.compile(r"^[0-9a-f]{64}$")
+HEX64 = re.compile(r"[0-9a-f]{64}")
 POLICY_KEYS = {
     "schemaVersion",
     "app",
@@ -57,6 +57,10 @@ def unique_json_object(pairs):
     return result
 
 
+def is_fingerprint(value):
+    return isinstance(value, str) and HEX64.fullmatch(value) is not None
+
+
 def check_policy(block, where):
     errors = []
     if not isinstance(block, dict) or set(block) not in ({"policy"}, {"policyJSON"}):
@@ -81,9 +85,7 @@ def check_policy(block, where):
         errors.append(f"{where}: identityPrefix must be a full profile namespace ending with ':'")
         prefix = ""
     issuers = policy.get("trustedIssuers")
-    if not isinstance(issuers, list) or not issuers or not all(
-        isinstance(x, str) and HEX64.match(x) for x in issuers
-    ):
+    if not isinstance(issuers, list) or not issuers or not all(is_fingerprint(value) for value in issuers):
         errors.append(f"{where}: trustedIssuers must be a non-empty list of 64 lowercase hex strings")
     for key in ("identities", "disabledIdentities"):
         values = policy.get(key, [])
@@ -114,9 +116,13 @@ def check_policy(block, where):
         errors.append(f"{where}: stripHeaders must be true or omitted")
     if not isinstance(policy.get("app"), str) or not policy["app"].strip():
         errors.append(f"{where}: app must be a non-empty string")
-    for entry in policy.get("blockedFingerprints", []):
-        if not isinstance(entry, dict) or not HEX64.match(str(entry.get("fingerprint", ""))):
-            errors.append(f"{where}: blockedFingerprints entries need a 64 lowercase hex fingerprint")
+    blocked = policy.get("blockedFingerprints", [])
+    if not isinstance(blocked, list):
+        errors.append(f"{where}: blockedFingerprints must be a list")
+    else:
+        for entry in blocked:
+            if not isinstance(entry, dict) or not is_fingerprint(entry.get("fingerprint")):
+                errors.append(f"{where}: blockedFingerprints entries need a 64 lowercase hex fingerprint")
     return errors
 
 
