@@ -583,6 +583,12 @@ func TestTraefikMatrix(t *testing.T) {
 					p["forwardIdentityHeader"] = "Authorization"
 					return p
 				}()}, "forwardIdentityHeader must be a valid"},
+				{object{"policy": func() object {
+					p := f.policy("broken", []string{alice})
+					p["forwardIdentityHeader"] = "X-Mtls-Client-Value"
+					p["forwardFingerprintHeader"] = "x-mtls-client_value"
+					return p
+				}()}, "forwardIdentityHeader and forwardFingerprintHeader must not use the same header"},
 			} {
 				broken := tc.block
 				f.config["http"].(object)["middlewares"].(object)["broken"] = object{"plugin": object{"traefik-mtls-authz": object{"policy": f.policy("broken", []string{alice})}}}

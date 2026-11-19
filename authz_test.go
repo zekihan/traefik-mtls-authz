@@ -606,18 +606,19 @@ func TestForwardLeafHeaders(t *testing.T) {
 
 func TestForwardHeaderCollisions(t *testing.T) {
 	keys := []string{"forwardIdentityHeader", "forwardFingerprintHeader", "forwardNotAfterHeader"}
-	for i := range keys {
-		for j := range keys {
-			if i >= j {
-				continue
+	for _, alternate := range []string{"x-mtls-SAME-NAME", "x-mtls-SAME_NAME"} {
+		t.Run(alternate, func(t *testing.T) {
+			for i, first := range keys {
+				for _, second := range keys[i+1:] {
+					cfg := validConfig()
+					p := (*cfg)["policy"].(map[string]interface{})
+					p[first], p[second] = "X-Mtls-Same-Name", alternate
+					if _, err := New(context.Background(), http.NotFoundHandler(), cfg, "test"); err == nil {
+						t.Errorf("accepted colliding headers %s=%q and %s=%q", first, p[first], second, p[second])
+					}
+				}
 			}
-			cfg := validConfig()
-			p := (*cfg)["policy"].(map[string]interface{})
-			p[keys[i]], p[keys[j]] = "X-Mtls-Same", "x-mtls-SAME"
-			if _, err := New(context.Background(), http.NotFoundHandler(), cfg, "test"); err == nil {
-				t.Fatalf("accepted %s == %s", keys[i], keys[j])
-			}
-		}
+		})
 	}
 	for _, key := range keys[1:] {
 		for _, header := range []string{"Authorization", "X-Custom", "X-Mtls-", "X-Mtls-Bad Name"} {
@@ -630,7 +631,7 @@ func TestForwardHeaderCollisions(t *testing.T) {
 	}
 	cfg := validConfig()
 	p := (*cfg)["policy"].(map[string]interface{})
-	p["forwardIdentityHeader"], p["forwardFingerprintHeader"], p["forwardNotAfterHeader"] = "X-Mtls-A", "X-Mtls-B", "X-Mtls-C"
+	p["forwardIdentityHeader"], p["forwardFingerprintHeader"], p["forwardNotAfterHeader"] = "X-Mtls-A", "X-Mtls-B", "X-Mtls-C_Value"
 	if _, err := New(context.Background(), http.NotFoundHandler(), cfg, "test"); err != nil {
 		t.Fatal(err)
 	}
