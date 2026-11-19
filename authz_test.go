@@ -313,6 +313,33 @@ func TestConstraintValidation(t *testing.T) {
 	}
 }
 
+func TestConstraintSanitizedSegments(t *testing.T) {
+	for _, tc := range []struct {
+		path  string
+		valid bool
+	}{
+		{"/.", false},
+		{"/a/./b", false},
+		{"/a/.", false},
+		{"/a/.;v=1/b", false},
+		{"/a/;v=1/b", false},
+		{"/", true},
+		{"/.well-known/status.json", true},
+		{"/a/b;v=1", true},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			cfg := validConfig()
+			(*cfg)["policy"].(map[string]interface{})["constraints"] = map[string]interface{}{
+				testIdentity: map[string]interface{}{"methods": []string{"GET"}, "paths": []string{tc.path}},
+			}
+			_, err := New(context.Background(), http.NotFoundHandler(), cfg, "test")
+			if (err == nil) != tc.valid {
+				t.Fatalf("New accepted path %q = %v, want %v (err=%v)", tc.path, err == nil, tc.valid, err)
+			}
+		})
+	}
+}
+
 func TestIdentitySyntax(t *testing.T) {
 	for _, id := range []string{"urn:noqer:mtls:clients:a", "urn:noqer:mtls:clients:a-b", "urn:noqer:mtls:client-1:a--b"} {
 		if !validIdentity(id, strings.Split(id, ":")[0]+":noqer:mtls:") {

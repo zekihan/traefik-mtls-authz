@@ -231,6 +231,12 @@ func (p policy) validate() error {
 			if err != nil || !strings.HasPrefix(path, "/") || (path != "/" && strings.HasSuffix(path, "/")) || strings.Contains(path, "//") || strings.Contains(path, "..") || strings.ContainsAny(path, "?#\\") || u.Path != path || u.EscapedPath() != path {
 				return fmt.Errorf("constraint paths must be absolute exact decoded paths without trailing slash, repeated slash, or parent-directory markers")
 			}
+			// The default Traefik path sanitizer removes these segments before authorization.
+			for _, segment := range strings.Split(path, "/") {
+				if segment == "." || strings.HasPrefix(segment, ".;") || strings.HasPrefix(segment, ";") {
+					return fmt.Errorf("constraint paths must not contain single-dot or parameter-only segments")
+				}
+			}
 		}
 	}
 	if p.StripHeaders != nil && !*p.StripHeaders {

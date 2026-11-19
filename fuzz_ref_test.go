@@ -155,13 +155,20 @@ func refPathByte(c byte) bool {
 }
 
 // refConstraintPath: absolute, exact, literal (no percent encoding), no
-// trailing slash except "/", no "//" and no ".." anywhere.
+// trailing slash except "/", no "//" or "..", and no segment removed by
+// Traefik's default path sanitizer.
 func refConstraintPath(p string) bool {
 	if p == "" || p[0] != '/' || strings.Contains(p, "//") || strings.Contains(p, "..") || (p != "/" && strings.HasSuffix(p, "/")) {
 		return false
 	}
 	for i := 0; i < len(p); i++ {
 		if !refPathByte(p[i]) {
+			return false
+		}
+	}
+	for _, segment := range strings.Split(p, "/") {
+		name, _, hasParams := strings.Cut(segment, ";")
+		if name == "." || (name == "" && hasParams) {
 			return false
 		}
 	}

@@ -136,12 +136,15 @@ verified initial identity header rather than trailer fields.
 
 Constraint keys must be enrolled in that application's `identities` list; typos
 and unused rules fail policy loading. Constraints compare the HTTP method and
-middleware-visible path exactly. Paths
-must be absolute literal paths without a trailing slash (except `/`), `//`, `..`,
-query, fragment, backslash or characters needing percent-encoding. Encoded
-separators are rejected even when the entrypoint allows them. Traefik normalizes
-unreserved encodings before the middleware and forwards the same canonical path;
-for example `%75pload` becomes `upload` for both authorization and the backend. The optional fingerprint `expires` date is
+middleware-visible path exactly. Paths must be absolute literals without a trailing
+slash (except `/`), `//`, `..`, query, fragment, backslash or characters needing
+percent-encoding. Policy paths also reject single-dot segments (with or without
+path parameters) and segments consisting only of path parameters. Traefik v3.7.18
+removes these segments by default before the middleware runs. Use the sanitized
+path in the policy. Encoded separators are rejected even when the entrypoint
+allows them. Traefik normalizes unreserved encodings before the middleware and
+forwards the same canonical path. For example, `%75pload` becomes `upload` for
+both authorization and the backend. The optional fingerprint `expires` date is
 informational: a blocked fingerprint stays blocked until removed from the policy.
 
 ## Deployment contract
