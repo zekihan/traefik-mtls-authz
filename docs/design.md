@@ -130,7 +130,8 @@ coerced its values (R13). Two mutually exclusive transports are supported:
    wrong types and duplicate JSON keys are rejected too (no weak coercion);
 4. the semantic checks listed after the struct.
 
-The JSON reader has a 32-level nesting bound. An empty allowlist is valid and logs
+The JSON reader requires valid UTF-8 and rejects unpaired Unicode surrogate
+escapes. It has a 32-level nesting bound. An empty allowlist is valid and logs
 `empty_allowlist`; a missing/empty policy itself is invalid. Any failure returns an
 error from `New`, which Traefik turns into an unregistered router (R2).
 `.traefik.yml` `testData` contains a complete valid `policyJSON` policy for catalog

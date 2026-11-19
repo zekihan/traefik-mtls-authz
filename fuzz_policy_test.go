@@ -16,6 +16,10 @@ func seedPolicyDocs() []string {
 		strings.Replace(good, `"app":"test"`, `"app":"test","app":"other"`, 1),
 		strings.Replace(good, `"app":"test"`, `"app":"test","app":"other"`, 1),
 		strings.Replace(good, `"app":"test"`, `"App":"other"`, 1),
+		strings.Replace(good, `"app":"test"`, "\"app\":\"test\xff\"", 1),
+		strings.Replace(good, `"app":"test"`, `"app":"\uD800"`, 1),
+		strings.Replace(good, `"app":"test"`, `"app":"\uD83D\uDE00"`, 1),
+		strings.Replace(good, `"app":"test"`, `"app":"\uFFFD"`, 1),
 		strings.Replace(good, `"schemaVersion":1`, `"ſchemaVersion":1`, 1),
 		strings.Replace(good, `"schemaVersion":1`, `"schemaVersion":1.0`, 1),
 		strings.Replace(good, `"schemaVersion":1`, `"schemaVersion":1e0`, 1),
@@ -89,25 +93,22 @@ func checkNativeTransport(t *testing.T, doc string, want bool) {
 	_, err := parsePolicy(&map[string]interface{}{"policy": obj})
 	if (err == nil) != want {
 		// Documented divergences (docs/fuzzing.md): the native transport
-		// receives an already-decoded map, so it cannot see duplicate keys
-		// (the last one won) or the number spelling (1.0 and 1e0 became the
-		// integer 1). Every other difference is a finding.
-		if !want && err == nil && (schemaVersionSpelling(doc) || hasDuplicateKeys(doc)) {
+		// receives an already-decoded map with duplicate keys collapsed,
+		// number spellings lost and malformed Unicode replaced with U+FFFD.
+		if !want && err == nil && nativeTransportCanNormalize(doc) {
 			return
 		}
 		t.Fatalf("native policy transport accepted=%v but policyJSON accepted=%v (err=%v)", err == nil, want, err)
 	}
 }
 
-func hasDuplicateKeys(doc string) bool {
-	root, ok := refParseJSON([]byte(doc))
-	return ok && !refKeysUnique(root)
-}
-
-func schemaVersionSpelling(doc string) bool {
-	root, ok := refParseJSON([]byte(doc))
+func nativeTransportCanNormalize(doc string) bool {
+	root, ok, invalidUnicode := refParseJSON([]byte(doc))
 	if !ok || root.kind != 'o' {
 		return false
+	}
+	if invalidUnicode || !refKeysUnique(root) {
+		return true
 	}
 	v, ok := root.get("schemaVersion")
 	return ok && v.kind == 'n' && v.num != "1"

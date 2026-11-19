@@ -537,19 +537,20 @@ type refJSON struct {
 }
 
 type refJSONParser struct {
-	s     []byte
-	i     int
-	depth int
+	s              []byte
+	i              int
+	depth          int
+	invalidUnicode bool
 }
 
-func refParseJSON(data []byte) (*refJSON, bool) {
+func refParseJSON(data []byte) (doc *refJSON, valid, invalidUnicode bool) {
 	p := &refJSONParser{s: data}
 	v, ok := p.value()
 	if !ok {
-		return nil, false
+		return nil, false, p.invalidUnicode
 	}
 	p.ws()
-	return v, p.i == len(p.s)
+	return v, p.i == len(p.s), p.invalidUnicode
 }
 
 func (p *refJSONParser) ws() {
@@ -764,6 +765,7 @@ func (p *refJSONParser) str() (string, bool) {
 						}
 					}
 					p.i = save
+					p.invalidUnicode = true
 					r = utf8.RuneError
 				}
 				out = append(out, r)
@@ -772,6 +774,9 @@ func (p *refJSONParser) str() (string, bool) {
 			}
 		default:
 			r, size := utf8.DecodeRune(p.s[p.i:])
+			if r == utf8.RuneError && size == 1 {
+				p.invalidUnicode = true
+			}
 			p.i += size
 			out = append(out, r)
 		}
@@ -851,8 +856,8 @@ func refOnlyKeys(v *refJSON, allowed ...string) bool {
 // the resulting reference policy.
 func refAcceptPolicy(data []byte) (refPolicy, bool) {
 	var rp refPolicy
-	doc, ok := refParseJSON(data)
-	if !ok || doc.kind != 'o' || !refKeysUnique(doc) {
+	doc, ok, invalidUnicode := refParseJSON(data)
+	if !ok || invalidUnicode || doc.kind != 'o' || !refKeysUnique(doc) {
 		return rp, false
 	}
 	if !refOnlyKeys(doc, "schemaVersion", "app", "policyRevision", "trustedIssuers", "identityPrefix", "identities", "disabledIdentities", "blockedFingerprints", "constraints", "stripHeaders", "forwardIdentityHeader", "forwardFingerprintHeader", "forwardNotAfterHeader") {
