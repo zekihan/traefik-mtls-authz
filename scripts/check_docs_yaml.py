@@ -101,8 +101,13 @@ def check_policy(block, where):
                 errors.append(f"{where}: constraint key {identity!r} must be enrolled")
             if not identity.startswith(prefix):
                 errors.append(f"{where}: constraint key {identity!r} is outside the identityPrefix")
-            if not isinstance(rule, dict) or not rule.get("methods") or not rule.get("paths"):
-                errors.append(f"{where}: constraint {identity!r} needs non-empty methods and paths")
+            if not isinstance(rule, dict):
+                errors.append(f"{where}: constraint {identity!r} must be a mapping")
+                continue
+            for field in ("methods", "paths"):
+                values = rule.get(field)
+                if not isinstance(values, list) or not values or not all(isinstance(value, str) for value in values):
+                    errors.append(f"{where}: constraint {identity!r}.{field} must be a non-empty list of strings")
     forwards = []
     for key in ("forwardIdentityHeader", "forwardFingerprintHeader", "forwardNotAfterHeader"):
         forward = policy.get(key, "")
