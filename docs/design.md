@@ -165,7 +165,7 @@ type blockedFingerprint struct {
 }
 
 type constraint struct {
-	Methods []string `json:"methods"` // uppercase standard methods
+	Methods []string `json:"methods"` // supported uppercase standard methods
 	Paths   []string `json:"paths"`   // absolute, canonical literal paths
 }
 ```
@@ -175,7 +175,9 @@ Semantic checks (error from `New`): schema version other than 1; empty `app`, `t
 list; an identity or constraint key outside `identityPrefix`; a constraint key absent from
 `identities`; a constraint with an empty method or path list;
 `stripHeaders: false`.
-Methods are the nine standard uppercase HTTP methods. Canonical literal paths allow
+Allowed methods are `GET`, `HEAD`, `POST`, `PUT`, `DELETE`, `OPTIONS`, `TRACE` and
+`PATCH`. Traefik v3.7.15 and later reject `CONNECT` before routing, so the plugin
+rejects it during policy validation. Canonical literal paths allow
 `/` as the root exception to the trailing-slash rule, and reject repeated slashes,
 `..`, query/fragment, backslash and spellings that need percent-encoding. They
 also reject single-dot segments (with or without path parameters) and

@@ -313,6 +313,27 @@ func TestConstraintValidation(t *testing.T) {
 	}
 }
 
+func TestConstraintRejectsConnect(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		methods []string
+	}{
+		{"connect-only", []string{"CONNECT"}},
+		{"with-get", []string{"GET", "CONNECT"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validConfig()
+			(*cfg)["policy"].(map[string]interface{})["constraints"] = map[string]interface{}{
+				testIdentity: map[string]interface{}{"methods": tc.methods, "paths": []string{"/"}},
+			}
+			h, err := New(context.Background(), http.NotFoundHandler(), cfg, "test")
+			if h != nil || err == nil || !strings.Contains(err.Error(), `unsupported constraint method "CONNECT"`) {
+				t.Fatalf("New with methods %v returned handler=%t err=%v, want CONNECT rejection", tc.methods, h != nil, err)
+			}
+		})
+	}
+}
+
 func TestConstraintSanitizedSegments(t *testing.T) {
 	for _, tc := range []struct {
 		path  string

@@ -222,8 +222,9 @@ func (p policy) validate() error {
 			return err
 		}
 		for _, method := range rule.Methods {
-			if !contains([]string{"GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH"}, method) {
-				return fmt.Errorf("constraint methods must be uppercase standard HTTP methods")
+			// Traefik rejects CONNECT before routing.
+			if !contains([]string{"GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS", "TRACE", "PATCH"}, method) {
+				return fmt.Errorf("unsupported constraint method %q", method)
 			}
 		}
 		for _, path := range rule.Paths {

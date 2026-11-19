@@ -136,10 +136,14 @@ verified initial identity header rather than trailer fields.
 
 Constraint keys must be enrolled in that application's `identities` list; typos
 and unused rules fail policy loading. Constraints compare the HTTP method and
-middleware-visible path exactly. Paths must be absolute literals without a trailing
-slash (except `/`), `//`, `..`, query, fragment, backslash or characters needing
-percent-encoding. Policy paths also reject single-dot segments (with or without
-path parameters) and segments consisting only of path parameters. Traefik v3.7.18
+middleware-visible path exactly. Traefik v3.7.15 and later reject `CONNECT`
+before routing. Remove `CONNECT` from existing constraint method lists before
+upgrading the plugin, since those policies now fail to load.
+
+Paths must be absolute literals without a trailing slash (except `/`), `//`, `..`,
+query, fragment, backslash or characters needing percent-encoding. Policy paths
+also reject single-dot segments (with or without path parameters) and segments
+consisting only of path parameters. Traefik v3.7.18
 removes these segments by default before the middleware runs. Use the sanitized
 path in the policy. Encoded separators are rejected even when the entrypoint
 allows them. Traefik normalizes unreserved encodings before the middleware and

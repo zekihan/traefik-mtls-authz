@@ -145,7 +145,7 @@ func refDate(s string) bool {
 	return day <= days
 }
 
-var refMethods = []string{"GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH"}
+var refMethods = []string{"GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS", "TRACE", "PATCH"}
 
 // refPathByte is RFC 3986 pchar minus pct-encoded, plus '/'. Brackets are
 // accepted because Go's url package leaves them literal (see docs/fuzzing.md).
