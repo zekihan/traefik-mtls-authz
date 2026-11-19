@@ -248,8 +248,9 @@ func (p policy) validate() error {
 		if !validHeader(f.value) || !strings.HasPrefix(strings.ToLower(f.value), "x-mtls-") || len(f.value) <= len("X-Mtls-") {
 			return fmt.Errorf("%s must be a valid X-Mtls-* header token with a non-empty suffix", f.name)
 		}
+		normalized := normalizeHeaderName(f.value)
 		for _, other := range forwards[:i] {
-			if strings.EqualFold(f.value, other.value) {
+			if normalized == normalizeHeaderName(other.value) {
 				return fmt.Errorf("%s and %s must not use the same header", other.name, f.name)
 			}
 		}
@@ -266,6 +267,11 @@ func unique(values []string, name string) error {
 		seen[value] = true
 	}
 	return nil
+}
+
+// CGI-style backends expose both spellings as the same HTTP_* variable.
+func normalizeHeaderName(name string) string {
+	return strings.ReplaceAll(strings.ToLower(name), "_", "-")
 }
 
 func validHeader(name string) bool {
