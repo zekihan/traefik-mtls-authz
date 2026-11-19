@@ -12,12 +12,13 @@ import (
 // FuzzDecisionLog feeds attacker-controlled request fields (method, Host,
 // path, query, SNI) and certificate URI bytes into a denied request.
 // Properties: the deny log is exactly one line; the query string, request
-// headers and full fingerprints never appear; the identity field is bounded to
-// 128 bytes plus the truncation marker; the whole line is linear in the
-// request size; the response is the fixed 403.
+// headers and full fingerprints never appear; the identity field contains a
+// validated identity or is empty; the whole line is linear in the request size;
+// the response is the fixed 403.
 func FuzzDecisionLog(f *testing.F) {
 	quietFuzzLogs(f)
 	f.Add("GET", "app.test", "/path", "secret=1", "app.test", testIdentity)
+	f.Add("GET", "app.test", "/path", "", "app.test", testIdentity+"?token=synthetic-san-token")
 	f.Add("GET\n", "host\nforged=line", "/path\r\nevent=allow", "a=b\nc", "sni\x00", "urn:noqer:mtls:clients:\n"+strings.Repeat("a", 200))
 	f.Add(" ", "\xff\xfe", "/\"quoted\"", "", "", "urn:noqer:mtls:clients:é")
 	f.Fuzz(func(t *testing.T, method, host, path, query, sni, identity string) {
@@ -62,13 +63,17 @@ func FuzzDecisionLog(f *testing.F) {
 			t.Fatalf("missing identity field: %q", line)
 		}
 		quoted := line[start+len(" identity=") : end]
-		if len(quoted) > 4*128+len(`"[truncated]"`)+2 {
-			t.Fatalf("identity log field unbounded: %d bytes", len(quoted))
+		wantIdentity := ""
+		if refIdentity(identity, m.policy.IdentityPrefix) && identity == leaf.URIs[0].String() {
+			wantIdentity = identity
+		}
+		if quoted != `"`+wantIdentity+`"` {
+			t.Fatal("identity log field differs from the validated identity")
 		}
 		// Host, path, method and SNI are deliberately not truncated (design
 		// section 6); %q may expand each byte to at most 4 bytes, so the line
 		// stays linear in the attacker-controlled request size.
-		if bound := 4*(len(method)+len(host)+len(path)+len(sni)+128+len("[truncated]")) + 1024; len(line) > bound {
+		if bound := 4*(len(method)+len(host)+len(path)+len(sni)+128) + 1024; len(line) > bound {
 			t.Fatalf("deny log grew superlinearly: %d bytes > %d", len(line), bound)
 		}
 	})

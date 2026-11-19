@@ -53,7 +53,7 @@ production code. They avoid the production regular expressions, `encoding/asn1` 
 | `FuzzAuthorizeSynthetic` | fuzz_authz_test.go | arbitrary TLS state (nil entries, peer mismatch, several chains, extreme times, inconsistent raw and parsed SANs) and random policy; exact deny-reason agreement plus the allow invariant |
 | `FuzzHeaderSpoofing` | fuzz_authz_test.go | wire-parsed and raw non-canonical header keys; headers never change the decision; after an allow no header a backend could read as an identity or forwarded-cert header (case-folded, `_` treated as `-`) survives except the configured forward header carrying exactly the identity; unrelated headers are preserved |
 | `FuzzConstraintRequest` | fuzz_authz_test.go | `http.ReadRequest`-parsed request lines; an allow means the literal wire path and the proxied `EscapedPath` equal an allowed path byte for byte; every accepted constraint path is reachable by its literal request |
-| `FuzzDecisionLog` | fuzz_log_test.go | the deny log is exactly one line; no query, header or full fingerprint leaks; the identity field is bounded to 128 bytes plus the marker; the whole line is linear in the request size (I4); the response is the fixed 403 |
+| `FuzzDecisionLog` | fuzz_log_test.go | the deny log is exactly one line; no query, header or full fingerprint leaks; the identity field contains a validated identity or is empty; the whole line is linear in the request size (I4); the response is the fixed 403 |
 
 ## Runs
 
@@ -128,8 +128,8 @@ the other way round, apart from the documented native-transport exceptions in I1
   a bypass. Pin every root the client chains can reach, or decide whether `authorize`
   should scan all verified chains.
 - I4 (Low, log amplification): deny logs include Host, method, SNI and path without a
-  length cap. Only the identity is capped, at 128 bytes, as docs/design.md section 6
-  specifies. `%q` expands each non-printable byte to at most 4 bytes, so a single request
+  length cap. The identity field only logs validated identities of at most 128 bytes,
+  as docs/design.md section 6 specifies. `%q` expands each non-printable byte to at most 4 bytes, so a single request
   near Traefik's 1 MiB header limit can produce a deny line of about 4 MiB at ERROR level.
   Only a client holding a certificate that Traefik verified can reach this. The growth is
   linear, and `FuzzDecisionLog` now asserts that bound. Capping these fields would be a

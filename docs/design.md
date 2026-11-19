@@ -283,12 +283,12 @@ Deny and constructor decisions use a private `log.Logger` backed by the virtuali
 `log.Writer()` (Traefik ERROR, visible at INFO). Both paths respect Traefik's JSON
 format, file destination and plugin metadata. Direct OS file-descriptor writes are
 avoided. Each decision is emitted as one `key=value` line: `event`, `reason`, `app`, `policyRevision`, `router` (the middleware
-name Traefik passes to `New`), `identity` when parsed, `leafFp` and `anchorFp` (first 16 hex), `tlsVersion`,
+name Traefik passes to `New`), `identity` when validated, `leafFp` and `anchorFp` (first 16 hex), `tlsVersion`,
 `sni`, `host`, `method`, `path`. Request-only fields are omitted from constructor
 logs; invalid policies may have empty app/revision fields. Values are quoted to
-prevent multiline injection. The logged identity is capped at 128 bytes plus a
-`[truncated]` suffix, even for malformed or overlong certificate SANs. Never
-certificate bodies, full headers or URL queries.
+prevent multiline injection. A validated identity is at most 128 bytes. Rejected
+URI SANs leave the identity field empty. Logs omit certificate bodies, full headers
+and URL queries.
 
 Traefik's access log already records `TLSClientSubject` and the router name, and a 403 from the plugin is
 counted in `traefik_router_requests_total`. That is the metrics path.
