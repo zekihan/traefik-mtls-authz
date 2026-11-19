@@ -129,6 +129,8 @@ the policy. It is off by default. The header must be in the dedicated `X-Mtls-*`
 namespace with a non-empty suffix; its value replaces any inbound value.
 `forwardFingerprintHeader` and `forwardNotAfterHeader` follow the same rules
 (for example `X-Mtls-Fingerprint` and `X-Mtls-Not-After`), and each is off by default.
+The plugin removes any `Connection` options naming configured forward headers
+so Traefik's reverse proxy treats those headers as end-to-end.
 The three header names must be distinct (compared case-insensitively); a policy that
 reuses a name is rejected. Denials return HTTP 403,
 `forbidden`, `Cache-Control: no-store` and `X-Mtls-Authz-Reason`.

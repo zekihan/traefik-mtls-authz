@@ -85,6 +85,8 @@ Per request. No body access. The handler never wraps the ResponseWriter, so `htt
     (case-insensitively) and set it to, respectively, the identity, the leaf
     fingerprint (lowercase hex SHA-256 of the leaf DER, the value matched against
     `blockedFingerprints`) and the leaf `NotAfter` (RFC 3339, UTC).
+    Remove any `Connection` options naming those forwarded headers so the
+    reverse proxy treats them as end-to-end.
 12. `next.ServeHTTP(rw, req)`.
 
 Authorization happens once per HTTP request. A WebSocket is authorized at its Upgrade request; a streaming

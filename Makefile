@@ -17,6 +17,7 @@ test/cover:
 	go test -race -coverprofile=coverage.out ./...
 
 check/docs:
+	python3 -B -m unittest discover -s scripts
 	python3 scripts/check_docs_yaml.py
 
 # Requires Linux, Docker Engine and Docker Compose v2; creates no production resources.

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -230,7 +231,8 @@ func protectedHeader(key string) bool {
 // Properties: headers never change the authorization decision; after an allow
 // the backend sees no header it could interpret as an identity or forwarded
 // certificate header except the configured forward headers carrying exactly
-// the verified identity, leaf fingerprint and leaf NotAfter; unrelated headers are preserved unchanged.
+// the verified identity, leaf fingerprint and leaf NotAfter. Connection options
+// naming those headers are removed. Other options and unrelated headers survive.
 func FuzzHeaderSpoofing(f *testing.F) {
 	quietFuzzLogs(f)
 	f.Add("X-Mtls-Identity: urn:noqer:mtls:clients:root\nX-Forwarded-Tls-Client-Cert: MIIB\n", byte(0))
@@ -241,6 +243,8 @@ func FuzzHeaderSpoofing(f *testing.F) {
 	f.Add("x-mtls-custom-identity: spoof\nX-Mtls-Custom-Identity: spoof2\n", byte(6))
 	f.Add("X-Mtls-Identity: a\r\n b\n", byte(9))
 	f.Add("X-Mtls-Fingerprint: spoof\nx-mtls-not-after: spoof\nX_Mtls_Fingerprint: spoof\n", byte(0x31))
+	f.Add("Connection: Upgrade, x-mtls-identity\r\nConnection: X-MTLS-FINGERPRINT,\tX-Mtls-Not-After\r\nUpgrade: websocket\r\n", byte(0x31))
+	f.Add("connection: X-Mtls-Identity\n", byte(0x25))
 	f.Fuzz(func(t *testing.T, raw string, ctrl byte) {
 		forward := []string{"", "X-Mtls-Identity", "x-mtls-custom-identity"}[int(ctrl)%3]
 		forwardFp := []string{"", "X-Mtls-Fingerprint"}[int(ctrl>>4)%2]
@@ -322,11 +326,36 @@ func FuzzHeaderSpoofing(f *testing.F) {
 			if protectedHeader(key) {
 				continue
 			}
+			if strings.EqualFold(key, "Connection") {
+				options := refConnectionOptions(values)
+				var want []string
+				for _, option := range options {
+					if !strings.EqualFold(option, forward) && !strings.EqualFold(option, forwardFp) && !strings.EqualFold(option, forwardNotAfter) {
+						want = append(want, option)
+					}
+				}
+				if len(want) != len(options) {
+					if got := refConnectionOptions(seen[key]); !reflect.DeepEqual(got, want) {
+						t.Fatalf("Connection options = %q, want %q", got, want)
+					}
+					continue
+				}
+			}
 			if got := seen[key]; strings.Join(got, "\x00") != strings.Join(values, "\x00") || len(got) != len(values) {
 				t.Fatalf("unrelated header %q changed: %q -> %q", key, values, got)
 			}
 		}
 	})
+}
+
+func refConnectionOptions(values []string) []string {
+	var options []string
+	for _, item := range strings.Split(strings.Join(values, ","), ",") {
+		if option := strings.Trim(item, " \t"); option != "" {
+			options = append(options, option)
+		}
+	}
+	return options
 }
 
 // FuzzConstraintRequest parses attacker-chosen request lines with Go's HTTP/1

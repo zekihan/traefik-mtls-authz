@@ -229,8 +229,46 @@ func (m *Middleware) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 		req.Header.Set(f.name, f.value)
 	}
+	m.stripForwardedConnectionOptions(req.Header)
 	m.logDecision("allow", d, req)
 	m.next.ServeHTTP(w, req)
+}
+
+// The reverse proxy removes headers named in Connection before forwarding.
+func (m *Middleware) stripForwardedConnectionOptions(headers http.Header) {
+	if m.policy.ForwardIdentityHeader == "" && m.policy.ForwardFingerprintHeader == "" && m.policy.ForwardNotAfterHeader == "" {
+		return
+	}
+	for key, values := range headers {
+		if !strings.EqualFold(key, "Connection") {
+			continue
+		}
+		var keep []string
+		removed := false
+		for _, value := range values {
+			for _, option := range strings.Split(value, ",") {
+				option = strings.Trim(option, " \t")
+				if option == "" {
+					continue
+				}
+				if strings.EqualFold(option, m.policy.ForwardIdentityHeader) ||
+					strings.EqualFold(option, m.policy.ForwardFingerprintHeader) ||
+					strings.EqualFold(option, m.policy.ForwardNotAfterHeader) {
+					removed = true
+					continue
+				}
+				keep = append(keep, option)
+			}
+		}
+		if !removed {
+			continue
+		}
+		if len(keep) == 0 {
+			delete(headers, key)
+		} else {
+			headers[key] = []string{strings.Join(keep, ", ")}
+		}
+	}
 }
 
 func (m *Middleware) logDecision(event string, d decision, req *http.Request) {
