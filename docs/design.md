@@ -166,7 +166,7 @@ type blockedFingerprint struct {
 
 type constraint struct {
 	Methods []string `json:"methods"` // uppercase standard methods
-	Paths   []string `json:"paths"`   // absolute, exact, no trailing slash, no "//", no ".."
+	Paths   []string `json:"paths"`   // absolute, canonical literal paths
 }
 ```
 
@@ -176,8 +176,11 @@ list; an identity or constraint key outside `identityPrefix`; a constraint key a
 `identities`; a constraint with an empty method or path list;
 `stripHeaders: false`.
 Methods are the nine standard uppercase HTTP methods. Canonical literal paths allow
-`/` as the root exception to the trailing-slash rule, and reject query/fragment,
-backslash and spellings that need percent-encoding on the wire. A nonempty fingerprint `expires` must be
+`/` as the root exception to the trailing-slash rule, and reject repeated slashes,
+`..`, query/fragment, backslash and spellings that need percent-encoding. They
+also reject single-dot segments (with or without path parameters) and
+parameter-only segments. Traefik v3.7.18 removes these segments by default
+before the path comparison. A nonempty fingerprint `expires` must be
 a valid `YYYY-MM-DD` date; it never automatically removes a block. A nonempty
 forwarded header (`forwardIdentityHeader`, `forwardFingerprintHeader`, `forwardNotAfterHeader`) must be a valid
 `X-Mtls-*` HTTP header token with a non-empty suffix, and no two of the three may name the same header,

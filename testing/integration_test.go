@@ -542,9 +542,14 @@ func TestTraefikMatrix(t *testing.T) {
 					for _, path := range []string{"/insert%2Fjournald/upload", "/insert%2fjournald/upload"} {
 						f.expect("constrained.test", "constrained.test", "alice", version, "POST", path, 403, "constraint_path")
 					}
-					// Traefik normalizes unreserved encodings and dot segments before
-					// middleware. The backend must receive exactly the same canonical path.
-					for _, path := range []string{"/insert/journald/%75pload", "/insert/journald/./upload", "/insert/journald/discard/../upload"} {
+					// The backend must receive the canonical path seen by the middleware.
+					for _, path := range []string{
+						"/insert/journald/%75pload",
+						"/insert/journald/./upload",
+						"/insert/journald/.;v=1/upload",
+						"/insert/journald/;v=1/upload",
+						"/insert/journald/discard/../upload",
+					} {
 						res, _, err := f.request("constrained.test", "constrained.test", "alice", version, "POST", path)
 						if err != nil {
 							t.Fatal(err)
@@ -578,6 +583,11 @@ func TestTraefikMatrix(t *testing.T) {
 				{object{"policy": nil}, "policy must be a JSON object"},
 				{object{"policy": func() object { p := f.policy("broken", []string{alice}); p["unknown"] = true; return p }()}, "unknown field"},
 				{object{"policy": func() object { p := f.policy("broken", []string{}); p["identityPrefix"] = "urn:noqer:mtls:"; return p }()}, "identityPrefix must be a full"},
+				{object{"policy": func() object {
+					p := f.policy("broken", []string{alice})
+					p["constraints"] = object{alice: object{"methods": []string{"GET"}, "paths": []string{"/status/.;v=1/ready"}}}
+					return p
+				}()}, "constraint paths must not contain single-dot or parameter-only segments"},
 				{object{"policy": func() object {
 					p := f.policy("broken", []string{alice})
 					p["forwardIdentityHeader"] = "Authorization"
