@@ -114,10 +114,10 @@ the other way round, apart from the documented native-transport exceptions in I1
 
 ### Informational (recorded, not changed)
 
-- I1: the native `policy` transport cannot detect duplicate keys or number spellings
-  (`1.0` and `1e0` become integer 1), because the provider has already decoded the map.
-  `FuzzPolicyJSON` exempts exactly these two cases. `policyJSON` remains the recommended
-  transport (docs/design.md).
+- I1: a provider decoding the native `policy` map can collapse duplicate keys,
+  turn number spellings such as `1.0` and `1e0` into integer 1, or replace malformed
+  Unicode with U+FFFD. `FuzzPolicyJSON` exempts these cases when comparing transports.
+  `policyJSON` retains the original document for validation (docs/design.md).
 - I2: constraint paths accept `[` and `]`, because Go's `net/url` leaves them literal in
   `EscapedPath`. RFC 3986 does not allow them in a path. This is harmless because matching
   is exact and every accepted path is reachable by its literal request. The reference

@@ -5,11 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
+	"unicode/utf8"
 )
 
-// validateJSON rejects duplicate keys and trailing documents in policyJSON.
+// validateJSON rejects duplicate keys, trailing documents and lossy Unicode decoding.
 // The object form is marshaled first and goes through the same checks.
 func validateJSON(data []byte) error {
+	if !utf8.Valid(data) {
+		return fmt.Errorf("policy JSON must be valid UTF-8")
+	}
 	d := json.NewDecoder(bytes.NewReader(data))
 	d.UseNumber()
 	first, err := d.Token()
@@ -22,7 +27,40 @@ func validateJSON(data []byte) error {
 	if _, err := d.Token(); err != io.EOF {
 		return fmt.Errorf("policy must contain exactly one JSON document")
 	}
+	if !validSurrogateEscapes(data) {
+		return fmt.Errorf("policy JSON contains an unpaired Unicode surrogate escape")
+	}
 	return nil
+}
+
+// encoding/json replaces unpaired surrogates with U+FFFD. After checking the JSON
+// syntax, inspect the escapes directly to distinguish them from a literal U+FFFD.
+func validSurrogateEscapes(data []byte) bool {
+	const highStart, lowStart, surrogateEnd = 0xd800, 0xdc00, 0xdfff
+	for {
+		i := bytes.IndexByte(data, '\\')
+		if i == -1 {
+			return true
+		}
+		data = data[i+1:]
+		if data[0] != 'u' {
+			data = data[1:]
+			continue
+		}
+		unit, _ := strconv.ParseUint(string(data[1:5]), 16, 16)
+		data = data[5:]
+		if unit < highStart || unit > surrogateEnd {
+			continue
+		}
+		if unit >= lowStart || !bytes.HasPrefix(data, []byte(`\u`)) {
+			return false
+		}
+		low, _ := strconv.ParseUint(string(data[2:6]), 16, 16)
+		if low < lowStart || low > surrogateEnd {
+			return false
+		}
+		data = data[6:]
+	}
 }
 
 func jsonObject(d *json.Decoder, depth int) error {

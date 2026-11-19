@@ -573,6 +573,10 @@ func TestTraefikMatrix(t *testing.T) {
 			if catchall {
 				fallback = 421
 			}
+			brokenPolicy, err := json.Marshal(f.policy("broken", []string{alice}))
+			if err != nil {
+				t.Fatal(err)
+			}
 			for _, tc := range []struct {
 				block     object
 				wantError string
@@ -582,6 +586,7 @@ func TestTraefikMatrix(t *testing.T) {
 				{object{"policy": []object{f.policy("broken", []string{alice})}}, "policy must be a JSON object"},
 				{object{"policy": "bad"}, "policy must be a JSON object"},
 				{object{"policy": nil}, "policy must be a JSON object"},
+				{object{"policyJSON": strings.Replace(string(brokenPolicy), `"app":"broken"`, `"app":"\uD800"`, 1)}, "unpaired Unicode surrogate escape"},
 				{object{"policy": func() object { p := f.policy("broken", []string{alice}); p["unknown"] = true; return p }()}, "unknown field"},
 				{object{"policy": func() object { p := f.policy("broken", []string{}); p["identityPrefix"] = "urn:noqer:mtls:"; return p }()}, "identityPrefix must be a full"},
 				{object{"policy": func() object {
