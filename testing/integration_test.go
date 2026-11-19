@@ -537,6 +537,7 @@ func TestTraefikMatrix(t *testing.T) {
 					f.expect("app-b.test", "app-b.test", "bob", version, "GET", "/", 200, "")
 					f.expect("constrained.test", "constrained.test", "alice", version, "POST", "/insert/journald/upload", 200, "")
 					f.expect("constrained.test", "constrained.test", "alice", version, "GET", "/insert/journald/upload", 403, "constraint_method")
+					f.expect("constrained.test", "constrained.test", "alice", version, "CONNECT", "/insert/journald/upload", http.StatusNotImplemented, "")
 					// The stock entrypoint allows encoded slashes; enforce exact spelling in
 					// the constrained authorization policy regardless of that default.
 					for _, path := range []string{"/insert%2Fjournald/upload", "/insert%2fjournald/upload"} {
@@ -588,6 +589,11 @@ func TestTraefikMatrix(t *testing.T) {
 					p["constraints"] = object{alice: object{"methods": []string{"GET"}, "paths": []string{"/status/.;v=1/ready"}}}
 					return p
 				}()}, "constraint paths must not contain single-dot or parameter-only segments"},
+				{object{"policy": func() object {
+					p := f.policy("broken", []string{alice})
+					p["constraints"] = object{alice: object{"methods": []string{"GET", "CONNECT"}, "paths": []string{"/"}}}
+					return p
+				}()}, "unsupported constraint method"},
 				{object{"policy": func() object {
 					p := f.policy("broken", []string{alice})
 					p["forwardIdentityHeader"] = "Authorization"
