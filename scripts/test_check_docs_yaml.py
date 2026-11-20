@@ -1,10 +1,31 @@
 import json
 import unittest
 
-from check_docs_yaml import check_policy
+from check_docs_yaml import check_policy, find_plugin_blocks
 
 
 FINGERPRINT = "0123456789abcdef" * 4
+
+
+class PluginBlockDiscoveryTest(unittest.TestCase):
+    def test_middleware_name_can_match_plugin_name(self):
+        block = {"policyJSON": "{}"}
+        document = {
+            "http": {
+                "middlewares": {
+                    "traefik-mtls-authz": {"plugin": {"traefik-mtls-authz": block}},
+                },
+            },
+        }
+        self.assertEqual(list(find_plugin_blocks(document)), [block])
+
+    def test_ignores_matching_kubernetes_label(self):
+        block = {"policyJSON": "{}"}
+        document = {
+            "metadata": {"labels": {"traefik-mtls-authz": "enabled"}},
+            "spec": {"plugin": {"traefik-mtls-authz": block}},
+        }
+        self.assertEqual(list(find_plugin_blocks(document)), [block])
 
 
 class FingerprintValidationTest(unittest.TestCase):
