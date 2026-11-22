@@ -12,4 +12,4 @@ Validation includes unit/race, vet, docs checks and pinned real Traefik v3.7.14 
 
 Read README.md and docs/design.md before deployment. Authorization must cover every matching router; policy changes do not terminate existing streams. Kubernetes provider loading and live catalog delivery are separate from the local runtime acceptance tests. No production routes are changed by this release.
 
-Catalog archive SHA-256: pending catalog indexing. The exact digest will be appended after the catalog serves v0.2.0; operators must pin both version and that archive hash.
+Catalog archive SHA-256: pending catalog indexing. The exact digest will be appended after the catalog serves v0.2.1; operators must pin both version and that archive hash.
