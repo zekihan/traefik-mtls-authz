@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -489,6 +490,79 @@ func TestAdditionalPolicyValidation(t *testing.T) {
 	(*cfg)["policy"].(map[string]interface{})["constraints"] = map[string]interface{}{"urn:noqer:mtls:other:alice": map[string]interface{}{"methods": []string{"GET"}, "paths": []string{"/"}}}
 	if _, err := New(context.Background(), http.NotFoundHandler(), cfg, "test"); err == nil {
 		t.Fatal("accepted outside constraint identity")
+	}
+	for _, field := range []string{"fingerprint", "note", "expires"} {
+		t.Run("null-"+field, func(t *testing.T) {
+			cfg := validConfig()
+			entry := map[string]interface{}{"fingerprint": strings.Repeat("ab", 32)}
+			entry[field] = nil
+			(*cfg)["policy"].(map[string]interface{})["blockedFingerprints"] = []interface{}{entry}
+			h, err := New(context.Background(), http.NotFoundHandler(), cfg, "test")
+			if h != nil || err == nil || !strings.Contains(err.Error(), field+" must not be null") {
+				t.Fatalf("handler=%v err=%v", h, err)
+			}
+		})
+	}
+}
+
+func TestPolicyValueMustBeJSONCompatible(t *testing.T) {
+	cfg := map[string]interface{}{"policy": map[string]interface{}{"schemaVersion": make(chan int)}}
+	h, err := New(context.Background(), http.NotFoundHandler(), &cfg, "test")
+	if h != nil || err == nil || !strings.Contains(err.Error(), "JSON-compatible") {
+		t.Fatalf("handler=%v err=%v", h, err)
+	}
+}
+
+func TestNilRequestURL(t *testing.T) {
+	r := validRequest()
+	r.URL = nil
+	w := httptest.NewRecorder()
+	newTestMiddleware(t, validConfig(), nil).ServeHTTP(w, r)
+	if w.Code != 200 {
+		t.Fatalf("unconstrained nil URL status=%d", w.Code)
+	}
+	cfg := validConfig()
+	(*cfg)["policy"].(map[string]interface{})["constraints"] = map[string]interface{}{
+		testIdentity: map[string]interface{}{"methods": []string{"GET"}, "paths": []string{"/"}},
+	}
+	w = httptest.NewRecorder()
+	newTestMiddleware(t, cfg, nil).ServeHTTP(w, r)
+	if w.Code != 403 || w.Header().Get("X-Mtls-Authz-Reason") != "constraint_path" {
+		t.Fatalf("status=%d headers=%v", w.Code, w.Header())
+	}
+}
+
+func TestConnectionOptionStripping(t *testing.T) {
+	cfg := validConfig()
+	(*cfg)["policy"].(map[string]interface{})["forwardIdentityHeader"] = "X-Mtls-Identity"
+	var got http.Header
+	m := newTestMiddleware(t, cfg, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+	}))
+	for _, tc := range []struct {
+		name       string
+		header     http.Header
+		connection []string
+	}{
+		{"unrelated", http.Header{"Connection": {"keep-alive"}, "X-Keep": {"1"}}, []string{"keep-alive"}},
+		{"empty-token", http.Header{"Connection": {"X-Mtls-Identity, , keep-alive"}}, []string{"keep-alive"}},
+		{"only-forward", http.Header{"Connection": {"X-Mtls-Identity,"}}, nil},
+		{"nil-header", nil, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := validRequest()
+			r.Header = tc.header
+			m.ServeHTTP(httptest.NewRecorder(), r)
+			if tc.name == "unrelated" && got.Get("X-Keep") != "1" {
+				t.Fatal(got)
+			}
+			if got.Get("X-Mtls-Identity") != testIdentity {
+				t.Fatal(got)
+			}
+			if diff := got["Connection"]; !slices.Equal(diff, tc.connection) {
+				t.Fatalf("Connection=%q, want %q", diff, tc.connection)
+			}
+		})
 	}
 }
 
