@@ -80,9 +80,10 @@ Per request. No body access. The handler never wraps the ResponseWriter, so `htt
     decoded path. Traefik normalizes unreserved encodings before this check and
     forwards that same normalized spelling to the backend.
 11. Delete inbound `X-Forwarded-Tls-Client-Cert`, `X-Forwarded-Tls-Client-Cert-Info` and every `X-Mtls-*`
-    header. For each of `forwardIdentityHeader`, `forwardFingerprintHeader` and
+    header. Comparison lowercases the name and treats `_` as `-`. For each of
+    `forwardIdentityHeader`, `forwardFingerprintHeader` and
     `forwardNotAfterHeader` that is set, delete any inbound header of that name
-    (case-insensitively) and set it to, respectively, the identity, the leaf
+    and set it to, respectively, the identity, the leaf
     fingerprint (lowercase hex SHA-256 of the leaf DER, the value matched against
     `blockedFingerprints`) and the leaf `NotAfter` (RFC 3339, UTC).
     Remove any `Connection` options naming those forwarded headers so the
@@ -188,8 +189,8 @@ parameter-only segments. Traefik v3.7.18 removes these segments by default
 before the path comparison. A nonempty fingerprint `expires` must be
 a valid `YYYY-MM-DD` date; it never automatically removes a block. A nonempty
 forwarded header (`forwardIdentityHeader`, `forwardFingerprintHeader`, `forwardNotAfterHeader`) must be a valid
-`X-Mtls-*` HTTP header token with a non-empty suffix, and no two of the three may name the same header,
-compared case-insensitively. `New` must not perform network or filesystem access.
+`X-Mtls-*` HTTP header token with a non-empty suffix, and no two of the three may name the same header.
+Comparison lowercases the name and treats `_` as `-`. `New` must not perform network or filesystem access.
 
 Recommended Kubernetes configuration uses `policyJSON` too. For file-provider
 configuration, use the same serialized object under

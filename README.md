@@ -123,7 +123,9 @@ These fields belong inside the JSON object supplied as `policyJSON`.
 | `forwardNotAfterHeader` | string | `""` | Optional header in the `X-Mtls-*` namespace carrying the leaf `NotAfter` in RFC 3339, UTC, for example `2027-01-31T12:00:00Z`. |
 
 Header stripping is mandatory. Successful requests lose `X-Forwarded-Tls-Client-Cert`,
-`X-Forwarded-Tls-Client-Cert-Info` and all `X-Mtls-*` headers. To pass the verified
+`X-Forwarded-Tls-Client-Cert-Info` and all `X-Mtls-*` headers. Matching lowercases
+the name and treats `_` as `-`, so `X_Mtls_Identity` and
+`X-Forwarded-Tls-Client-Cert_Info` are removed too. To pass the verified
 identity to a backend, configure `forwardIdentityHeader: "X-Mtls-Identity"` inside
 the policy. It is off by default. The header must be in the dedicated `X-Mtls-*`
 namespace with a non-empty suffix; its value replaces any inbound value.
@@ -131,8 +133,9 @@ namespace with a non-empty suffix; its value replaces any inbound value.
 (for example `X-Mtls-Fingerprint` and `X-Mtls-Not-After`), and each is off by default.
 The plugin removes any `Connection` options naming configured forward headers
 so Traefik's reverse proxy treats those headers as end-to-end.
-The three header names must be distinct (compared case-insensitively); a policy that
-reuses a name is rejected. Denials return HTTP 403,
+The three header names must be distinct. Comparison lowercases them and treats `_`
+as `-`, because CGI-style backends expose both spellings as one variable; a policy
+that reuses a name is rejected. Denials return HTTP 403,
 `forbidden`, `Cache-Control: no-store` and `X-Mtls-Authz-Reason`.
 Stripping applies to the initial HTTP headers. The plugin does not inspect or filter
 trailers, which are populated as the body is consumed; backends must use the

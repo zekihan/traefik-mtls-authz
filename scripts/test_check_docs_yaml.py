@@ -65,6 +65,34 @@ class FingerprintValidationTest(unittest.TestCase):
                 self.assertRegex("\n".join(self.errors()), "blockedFingerprints must be a list")
 
 
+class ForwardHeaderValidationTest(unittest.TestCase):
+    def policy(self, **headers):
+        body = {
+            "schemaVersion": 1,
+            "app": "test",
+            "identityPrefix": "urn:noqer:mtls:clients:",
+            "trustedIssuers": [FINGERPRINT],
+        }
+        body.update(headers)
+        return body
+
+    def test_rejects_underscore_alias_of_another_forward_header(self):
+        policy = self.policy(
+            forwardIdentityHeader="X-Mtls-Same-Name",
+            forwardFingerprintHeader="x-mtls-SAME_NAME",
+        )
+        errors = check_policy({"policyJSON": json.dumps(policy)}, "fixture")
+        self.assertRegex("\n".join(errors), "forwardFingerprintHeader duplicates")
+
+    def test_accepts_distinct_forward_headers(self):
+        policy = self.policy(
+            forwardIdentityHeader="X-Mtls-Identity",
+            forwardFingerprintHeader="X-Mtls-Fingerprint",
+            forwardNotAfterHeader="X-Mtls-Not-After",
+        )
+        self.assertEqual(check_policy({"policy": policy}, "fixture"), [])
+
+
 class ConstraintValidationTest(unittest.TestCase):
     def setUp(self):
         identity = "urn:noqer:mtls:clients:alice"
