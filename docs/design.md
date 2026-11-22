@@ -2,7 +2,7 @@
 
 Status: implemented for v0.1.1 (2026-10-30), with local real-Traefik acceptance tests; v0.2.0 adds the optional `forwardFingerprintHeader` and `forwardNotAfterHeader`.
 v0.1.0 remains the historical deny-all skeleton; no production deployment is implied.
-Target runtime: Traefik v3.7.14 (yaegi v0.16.1, Go 1.26 module), Go standard library only, no generics.
+Acceptance tests run Traefik v3.7.19, pinned by digest in `testing/compose.yaml`. `go.mod` selects Go 1.27.4. The plugin uses the Go standard library only and no generics. Section 2 cites Traefik v3.7.14 and yaegi v0.16.1 unless a row says otherwise.
 Deployment, GitOps policy distribution, PKI, DNS and migration details live in the argocd repository.
 
 ## 1. Boundaries
@@ -80,9 +80,10 @@ Per request. No body access. The handler never wraps the ResponseWriter, so `htt
     decoded path. Traefik normalizes unreserved encodings before this check and
     forwards that same normalized spelling to the backend.
 11. Delete inbound `X-Forwarded-Tls-Client-Cert`, `X-Forwarded-Tls-Client-Cert-Info` and every `X-Mtls-*`
-    header. For each of `forwardIdentityHeader`, `forwardFingerprintHeader` and
+    header. Comparison lowercases the name and treats `_` as `-`. For each of
+    `forwardIdentityHeader`, `forwardFingerprintHeader` and
     `forwardNotAfterHeader` that is set, delete any inbound header of that name
-    (case-insensitively) and set it to, respectively, the identity, the leaf
+    and set it to, respectively, the identity, the leaf
     fingerprint (lowercase hex SHA-256 of the leaf DER, the value matched against
     `blockedFingerprints`) and the leaf `NotAfter` (RFC 3339, UTC).
     Remove any `Connection` options naming those forwarded headers so the
@@ -188,8 +189,8 @@ parameter-only segments. Traefik v3.7.18 removes these segments by default
 before the path comparison. A nonempty fingerprint `expires` must be
 a valid `YYYY-MM-DD` date; it never automatically removes a block. A nonempty
 forwarded header (`forwardIdentityHeader`, `forwardFingerprintHeader`, `forwardNotAfterHeader`) must be a valid
-`X-Mtls-*` HTTP header token with a non-empty suffix, and no two of the three may name the same header,
-compared case-insensitively. `New` must not perform network or filesystem access.
+`X-Mtls-*` HTTP header token with a non-empty suffix, and no two of the three may name the same header.
+Comparison lowercases the name and treats `_` as `-`. `New` must not perform network or filesystem access.
 
 Recommended Kubernetes configuration uses `policyJSON` too. For file-provider
 configuration, use the same serialized object under
@@ -345,7 +346,7 @@ beside `policy`, a list-valued or string-valued or null `policy`, unknown nested
 next handler still sees `http.Hijacker` and `http.Flusher` on the ResponseWriter; concurrent requests against
 one handler.
 
-Real-Traefik integration (docker compose modeled on `traefik-real-ip/testing`, `traefik:v3.7.14` by digest,
+Real-Traefik integration (docker compose modeled on `traefik-real-ip/testing`, `traefik:v3.7.19` by digest,
 `core.strictTLSOptions=true` as in the deployment contract, source mounted at
 `/plugins-local/src/github.com/zekihan/traefik-mtls-authz`, file provider, test CA, intermediate and leaves
 generated per run, never checked in). Routers are plain `Host()` rules unless stated; priorities are explicit.

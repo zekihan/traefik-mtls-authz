@@ -60,6 +60,11 @@ def is_fingerprint(value):
     return isinstance(value, str) and HEX64.fullmatch(value) is not None
 
 
+def normalize_header(name):
+    """Match policy.normalizeHeaderName: ASCII case fold, and '_' counts as '-'."""
+    return name.lower().replace("_", "-")
+
+
 def check_policy(block, where):
     errors = []
     if not isinstance(block, dict) or set(block) not in ({"policy"}, {"policyJSON"}):
@@ -113,9 +118,10 @@ def check_policy(block, where):
         if not isinstance(forward, str) or (forward and not FORWARD_HEADER.fullmatch(forward)):
             errors.append(f"{where}: {key} must be empty or a valid X-Mtls-* token")
         elif forward:
-            if forward.lower() in forwards:
+            normalized = normalize_header(forward)
+            if normalized in forwards:
                 errors.append(f"{where}: {key} duplicates another forward header")
-            forwards.append(forward.lower())
+            forwards.append(normalized)
     if policy.get("stripHeaders", True) is not True:
         errors.append(f"{where}: stripHeaders must be true or omitted")
     if not isinstance(policy.get("app"), str) or not policy["app"].strip():

@@ -1,7 +1,7 @@
 # AGENTS.md
 
 This repository is a Traefik middleware plugin for per-application mTLS authorization.
-The v0.2.0 implementation (v0.1.1 plus optional leaf fingerprint and NotAfter forwarding) replaces the historical v0.1.0 deny-all skeleton.
+The implementation replaces the historical v0.1.0 deny-all skeleton. v0.2.0 added optional leaf fingerprint and NotAfter forwarding. `VERSION` is the version being prepared.
 Local acceptance tests do not imply a production deployment.
 
 Run `make tidy`, `make lint`, and `make test` before committing. Run `make check/docs`

@@ -57,8 +57,7 @@ production code. They avoid the production regular expressions, `encoding/asn1` 
 
 ## Runs
 
-All runs used `-parallel 4` on a 16-core Linux host with Go 1.27.3 (the toolchain
-selected by go.mod), three targets at a time. Exec counts are the final counts that
+All runs used `-parallel 4` on a 16-core Linux host with Go 1.27.3, three targets at a time. Exec counts are the final counts that
 `go test` reported.
 
 | Target | Smoke | 5 min | 60 min | 120 min | Total duration | Total execs | Corpus after | Failures |

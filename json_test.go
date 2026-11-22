@@ -3,6 +3,7 @@ package traefik_mtls_authz
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -43,5 +44,27 @@ func TestPolicyJSONUnicode(t *testing.T) {
 				t.Fatalf("decoded app = %q, want %q", got, tc.app)
 			}
 		})
+	}
+}
+
+func TestPolicyJSONNestingBound(t *testing.T) {
+	for _, kind := range []string{"object", "array"} {
+		for _, depth := range []int{31, 32} {
+			t.Run(fmt.Sprintf("%s/%d", kind, depth), func(t *testing.T) {
+				var nested string
+				if kind == "object" {
+					nested = strings.Repeat(`{"a":`, depth) + `1` + strings.Repeat(`}`, depth)
+				} else {
+					nested = strings.Repeat(`[`, depth) + `1` + strings.Repeat(`]`, depth)
+				}
+				err := validateJSON([]byte(`{"a":` + nested + `}`))
+				if depth == 31 && err != nil {
+					t.Fatal(err)
+				}
+				if depth == 32 && (err == nil || !strings.Contains(err.Error(), "nesting exceeds 32")) {
+					t.Fatalf("err=%v", err)
+				}
+			})
+		}
 	}
 }
