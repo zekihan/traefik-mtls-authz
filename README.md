@@ -3,7 +3,7 @@
 A Traefik middleware plugin for per-application client certificate authorization.
 
 [![Traefik Plugin](https://img.shields.io/badge/Traefik%20Plugin-Traefik%20mTLS%20Authorization-blue)](https://plugins.traefik.io/plugins/6ae44f4d45a3588988cfca95/traefik-m-tls-authorization)
-[![Version](https://img.shields.io/badge/version-0.2.0-green)](https://github.com/zekihan/traefik-mtls-authz/releases/tag/v0.2.0)
+[![Version](https://img.shields.io/badge/version-0.2.1-green)](https://github.com/zekihan/traefik-mtls-authz/releases/tag/v0.2.1)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/zekihan/traefik-mtls-authz/blob/main/LICENSE)
 [![Checks](https://github.com/zekihan/traefik-mtls-authz/actions/workflows/pr.yaml/badge.svg)](https://github.com/zekihan/traefik-mtls-authz/actions/workflows/pr.yaml)
 
@@ -29,7 +29,7 @@ argocd repository. No production routes have been changed by this implementation
 
 Find the plugin in the
 [Traefik Plugin Catalog](https://plugins.traefik.io/plugins/6ae44f4d45a3588988cfca95/traefik-m-tls-authorization).
-The current release is [v0.2.0](https://github.com/zekihan/traefik-mtls-authz/releases/tag/v0.2.0).
+The current release is [v0.2.1](https://github.com/zekihan/traefik-mtls-authz/releases/tag/v0.2.1).
 
 ### Static Configuration
 
@@ -44,11 +44,11 @@ experimental:
   plugins:
     traefik-mtls-authz:
       moduleName: github.com/zekihan/traefik-mtls-authz
-      version: v0.2.0
-      hash: "52c3cd8b71b59a97bd39134a6b05b2ead2ee02b76fb015db1632c6b0f7e809de"
+      version: v0.2.1
+      hash: "6bc16eeebee6117351ce0837235b82bf683ca6c84b4f119a6955a67549417db3"
 ```
 
-The hash pins the v0.2.0 archive downloaded from the Plugin Catalog. Update the
+The hash pins the v0.2.1 archive downloaded from the Plugin Catalog. Update the
 version and hash together when upgrading; it is not the hash of GitHub's source zip.
 Then create the middleware described below and place it first on every matching
 application router. The route must use `RequireAndVerifyClientCert`; see the
