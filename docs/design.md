@@ -2,7 +2,7 @@
 
 Status: implemented for v0.1.1 (2026-10-30), with local real-Traefik acceptance tests; v0.2.0 adds the optional `forwardFingerprintHeader` and `forwardNotAfterHeader`.
 v0.1.0 remains the historical deny-all skeleton; no production deployment is implied.
-Target runtime: Traefik v3.7.14 (yaegi v0.16.1, Go 1.26 module), Go standard library only, no generics.
+Acceptance tests run Traefik v3.7.19, pinned by digest in `testing/compose.yaml`. `go.mod` selects Go 1.27.4. The plugin uses the Go standard library only and no generics. Section 2 cites Traefik v3.7.14 and yaegi v0.16.1 unless a row says otherwise.
 Deployment, GitOps policy distribution, PKI, DNS and migration details live in the argocd repository.
 
 ## 1. Boundaries
@@ -345,7 +345,7 @@ beside `policy`, a list-valued or string-valued or null `policy`, unknown nested
 next handler still sees `http.Hijacker` and `http.Flusher` on the ResponseWriter; concurrent requests against
 one handler.
 
-Real-Traefik integration (docker compose modeled on `traefik-real-ip/testing`, `traefik:v3.7.14` by digest,
+Real-Traefik integration (docker compose modeled on `traefik-real-ip/testing`, `traefik:v3.7.19` by digest,
 `core.strictTLSOptions=true` as in the deployment contract, source mounted at
 `/plugins-local/src/github.com/zekihan/traefik-mtls-authz`, file provider, test CA, intermediate and leaves
 generated per run, never checked in). Routers are plain `Host()` rules unless stated; priorities are explicit.

@@ -17,7 +17,7 @@ There are no runtime dependencies outside the Go standard library.
 The v0.1.1 implementation replaces the v0.1.0 deny-all skeleton. It includes strict
 configuration validation, fingerprint blocking, disabled identities, exact
 method/path constraints, identity-header stripping and optional forwarding.
-The Docker Compose suite verifies real Traefik v3.7.14 / Yaegi loading, HTTP/1.1
+The Docker Compose suite verifies real Traefik v3.7.19 / Yaegi loading, HTTP/1.1
 and HTTP/2 on both TLS versions, session resumption, PROXY v2, routing failures,
 and stream behavior.
 These are local fixture tests; deployment and GitOps integration belong in the

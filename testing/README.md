@@ -1,7 +1,7 @@
 # Real Traefik acceptance tests
 
 Run `make test/integration` on Linux with Docker Engine and Compose v2. This runs
-Traefik v3.7.14 pinned by digest, with the repository mounted as a local Yaegi plugin
+Traefik v3.7.19 pinned by digest, with the repository mounted as a local Yaegi plugin
 and a file-provider configuration. The backend is an in-process Go HTTP server;
 Compose uses host networking to reach it. All entrypoints bind loopback on ephemeral
 ports. No Docker socket is mounted into Traefik.
@@ -68,7 +68,8 @@ cover unchanged policy; post-resumption CA withdrawal/expiry remains native TLS
 behavior outside that matrix, with session tickets disabled by the deployment
 contract. The ephemeral port helper releases its reservation before Compose binds;
 a concurrent host process could theoretically take that port and fail a fixture.
-Hosted CI results require pushing this change.
+Ordinary pull requests run `make lint` and `make test`. The publish workflow runs
+this suite on a tag release (`publishing: true` on `.github/workflows/pr.yaml`).
 
 Header stripping covers initial HTTP headers, not trailers populated while reading
 the body. Trailer filtering would require a separate body-processing design;
